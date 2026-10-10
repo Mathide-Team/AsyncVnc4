@@ -89,6 +89,12 @@ version minimale n'est pas confirmée par qui déploie ce fichier.
 
 Détail complet des 23 patches et de leur statut : @docs/features-backlog.md
 
+**2026-10-10** : repli de version (#28) et connexion inversée (#27)
+testés contre un vrai serveur tiers, x11vnc/libvncserver (`-rfbversion
+3.3`/`3.7`, `-connect_or_exit`) : 10 tests dans `test_live_x11vnc.py`, job
+CI « Serveur réel (x11vnc) », aucune modification de code. Voir
+`docs/sessions/session-22-2026-10-10.md`.
+
 ## Prochaine feature / prochaine session
 
 Plus aucun point 🟠 Moyenne restant. Les huit derniers 🟢 traités
