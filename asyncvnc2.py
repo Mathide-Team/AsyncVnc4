@@ -379,14 +379,30 @@ async def _sasl_negotiate(
     `SecurityResult` : ce n'est pas une limite de cette implémentation,
     c'est une propriété des mécanismes eux-mêmes.
 
-    **Jamais testé contre un vrai serveur** -- aucun serveur VNC de
-    référence installable dans ce sandbox n'annonce ce type de sécurité
-    (voir `docs/features-backlog.md`) ; seul un round-trip auto-cohérent
-    fabriqué à la main (`test_asyncvnc2.py`) confirme la conformité interne
-    du tramage à la lecture de la spec ci-dessus.
+    **Testé contre un vrai QEMU 10.2 le 2026-10-10 (issue #32)**, PLAIN
+    avec une base sasldb, via le sous-type VeNCrypt X509SASL (263) : seul
+    chemin où QEMU propose PLAIN (voir la ConnectionError ci-dessous et
+    `test_live_qemu_sasl.py`). Connexion et capture réussies ; mauvais mot de
+    passe et utilisateur inconnu : connexion fermée par QEMU, remontée en
+    PermissionError. ANONYMOUS n'est proposé par QEMU dans aucun mode
+    (SASL_SEC_NOANONYMOUS hors X509SASL ; en X509SASL, dépend de la
+    configuration Cyrus) : non vérifié contre un serveur réel.
     """
 
-    mechlist_length = await read_int(reader, 4)
+    try:
+        mechlist_length = await read_int(reader, 4)
+    except IncompleteReadError as exc:
+        # Vu contre un vrai QEMU 10.2 (2026-10-10, issue #32) : sans aucun
+        # mécanisme utilisable, il ferme la connexion au lieu d'envoyer une
+        # liste vide (trace : « no available SASL mechanisms »). Hors
+        # VeNCrypt X509SASL (et socket Unix), QEMU exige un mécanisme qui
+        # chiffre lui-même (min_ssf=56, NOPLAINTEXT, NOANONYMOUS) : PLAIN et
+        # ANONYMOUS sont retirés en SASL seul **et** en TLSSASL (TLS anonyme).
+        raise ConnectionError(
+            'SASL: le serveur a fermé la connexion avant la liste des mécanismes '
+            "(aucun mécanisme commun ? QEMU ne propose PLAIN/ANONYMOUS qu'en "
+            'VeNCrypt X509SASL : tls-creds-x509 + sasl=on)'
+        ) from exc
     mechlist = (await reader.readexactly(mechlist_length)).decode('ascii')
     mechanisms = set(mechlist.split(',')) if mechlist else set()
     if not mechanisms:
@@ -424,7 +440,14 @@ async def _sasl_negotiate(
         + clientout_padded
     )
 
-    serverout_length = await read_int(reader, 4)
+    try:
+        serverout_length = await read_int(reader, 4)
+    except IncompleteReadError as exc:
+        # QEMU (vérifié 2026-10-10) refuse un mauvais mot de passe ou un
+        # utilisateur inconnu en fermant la connexion, sans SecurityResult.
+        raise PermissionError(
+            f'SASL {chosen_mechanism}: authentification refusée (connexion fermée par le serveur)'
+        ) from exc
     await reader.readexactly(serverout_length)  # serverout-data, ignorée (voir docstring)
     complete_flag = await read_int(reader, 1)
     if complete_flag != 1:
@@ -493,6 +516,14 @@ _VENCRYPT_TLS_PLAIN = 259
 _VENCRYPT_X509_NONE = 260
 _VENCRYPT_X509_VNC = 261
 _VENCRYPT_X509_PLAIN = 262
+# Sous-types SASL (2026-10-10, issue #32) : TLS (anonyme) ou X509, puis la
+# négociation SASL du type de sécurité 20 (_sasl_negotiate) sur le flux
+# chiffré. Numéros d'après QEMU (ui/vnc.h : VNC_AUTH_VENCRYPT_X509SASL = 263,
+# VNC_AUTH_VENCRYPT_TLSSASL = 264). C'est la seule façon d'obtenir PLAIN
+# d'un vrai QEMU : sans TLS, QEMU exige un mécanisme SASL qui chiffre
+# lui-même (SSF >= 56, ex. DIGEST-MD5) et retire PLAIN de sa liste.
+_VENCRYPT_X509_SASL = 263
+_VENCRYPT_TLS_SASL = 264
 
 
 async def _start_tls_client(
@@ -645,9 +676,11 @@ async def _vencrypt_negotiate(
     for candidate in (
         _VENCRYPT_X509_VNC,
         _VENCRYPT_X509_PLAIN,
+        _VENCRYPT_X509_SASL,
         _VENCRYPT_X509_NONE,
         _VENCRYPT_TLS_VNC,
         _VENCRYPT_TLS_PLAIN,
+        _VENCRYPT_TLS_SASL,
         _VENCRYPT_TLS_NONE,
     ):
         if candidate in subtypes:
@@ -656,7 +689,8 @@ async def _vencrypt_negotiate(
     else:
         raise ValueError(
             f'unsupported VeNCrypt sub-types offered by server: {subtypes} (only '
-            f'TLSNone/TLSVnc/TLSPlain/X509None/X509Vnc/X509Plain are implemented)'
+            f'TLSNone/TLSVnc/TLSPlain/TLSSASL/X509None/X509Vnc/X509Plain/X509SASL '
+            f'are implemented)'
         )
 
     writer.write(chosen.to_bytes(4, 'big'))
@@ -679,7 +713,12 @@ async def _vencrypt_negotiate(
         raise ValueError('server failed to set up VeNCrypt TLS (TLS session initialisation failed)')
 
     if ssl_context is None:
-        if chosen in (_VENCRYPT_X509_NONE, _VENCRYPT_X509_VNC, _VENCRYPT_X509_PLAIN):
+        if chosen in (
+            _VENCRYPT_X509_NONE,
+            _VENCRYPT_X509_VNC,
+            _VENCRYPT_X509_PLAIN,
+            _VENCRYPT_X509_SASL,
+        ):
             # X509None/X509Vnc/X509Plain: the server presents a
             # real CA-signed certificate, unlike TLSNone/TLSVnc below --
             # this is exactly the "X509" prefix's meaning. The safe default
@@ -2814,6 +2853,10 @@ class Client:
                 # en amont diffère entre les deux ; ce qui suit est
                 # identique.
                 auth_type = 2
+            elif vencrypt_subtype in (_VENCRYPT_TLS_SASL, _VENCRYPT_X509_SASL):
+                # SASL (type 20) sur le flux TLS : même bloc auth_type == 20
+                # plus bas (issue #32, vérifié contre un vrai QEMU).
+                auth_type = 20
             elif vencrypt_subtype in (_VENCRYPT_TLS_PLAIN, _VENCRYPT_X509_PLAIN):
                 # Les sous-types "Plain" (ajoutés le 2026-09-14, anonyme ou
                 # X.509) envoient un couple identifiant/mot de passe en

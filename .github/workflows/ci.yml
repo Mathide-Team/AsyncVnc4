@@ -73,3 +73,18 @@ jobs:
         env:
           ASYNCVNC_LIVE: "1"
         run: uv run python3 -m unittest test_live_x11vnc -v
+
+      - name: QEMU et Cyrus SASL
+        run: |
+          SUDO=""; if [ "$(id -u)" != "0" ]; then SUDO="sudo"; fi
+          if ! command -v qemu-system-x86_64 >/dev/null || ! command -v saslpasswd2 >/dev/null; then
+            $SUDO apt-get update
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              qemu-system-x86 sasl2-bin libsasl2-modules openssl
+          fi
+          qemu-system-x86_64 --version | head -1
+
+      - name: Tests SASL contre QEMU
+        env:
+          ASYNCVNC_LIVE: "1"
+        run: uv run python3 -m unittest test_live_qemu_sasl -v
