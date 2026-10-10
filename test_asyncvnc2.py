@@ -37,6 +37,7 @@ from asyncvnc2 import (
     Screen,
     UpdateType,
     Video,
+    _lzo1x_decompress,
 )
 
 
@@ -215,6 +216,118 @@ class ZywrleTests(unittest.IsolatedAsyncioTestCase):
     def test_default_encodings_excludes_zywrle(self):
         self.assertNotIn(Enc.ZYWRLE, list(Enc.default()))
         self.assertIn(Enc.ZRLE, list(Enc.default()))
+
+
+def _lzo_source(nom: str) -> bytes:
+    """Données d'origine des vecteurs LZO (mêmes expressions qu'à la génération)."""
+    return {
+        'court': b'abc',
+        'repetitions': b'abcd' * 64,
+        'zeros_longs': bytes(1000),
+        'melange': b''.join([b'RFB', bytes(300), b'x' * 40, bytes(range(256)), b'\x01\x02' * 200]),
+        'pixels': bytes((i * 7) & 0xFF for i in range(4 * 64 * 16)),
+    }[nom]
+
+
+class Lzo1xTests(unittest.TestCase):
+    """
+    _lzo1x_decompress() (issue #24, encodage Ultra). Vecteurs produits par la
+    vraie liblzo2 via python-lzo (`lzo.compress(data, niveau, False)`, niveau
+    1 = lzo1x_1, celui de LibVNCServer ; 9 = lzo1x_999, autres codes de
+    correspondance). Vérifié aussi sur 612 entrées aléatoires (0 à 70 000
+    octets) le 2026-10-10, voir docs/sessions/session-23-2026-10-10.md.
+    """
+
+    VECTEURS = (
+        ('court', 1, '14616263110000'),
+        ('court', 9, '14616263110000'),
+        (
+            'repetitions',
+            1,
+            '05616263646162636420c31c0000026162636461626364616263646162636461626364110000',
+        ),
+        ('repetitions', 9, '156162636420db0c00110000'),
+        ('zeros_longs', 1, '02000000000020000000b610000c000000000000000000000000000000110000'),
+        ('zeros_longs', 9, '120020000000c90000110000'),
+        (
+            'melange',
+            1,
+            '0352464200000020000901007820060000000006000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff010201020102010201020102010201020102010201020120004c44000a02010201020102010201020102110000',
+        ),
+        (
+            'melange',
+            9,
+            '155246420020000b0100782006000000f0000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff010220006e0400110000',
+        ),
+        (
+            'pixels',
+            1,
+            '00f300070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c200000000000000000000000000000d9fc030c979ea5acb3bac1c8cfd6dde4ebf2f9110000',
+        ),
+        (
+            'pixels',
+            9,
+            '00ee00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f92000000000000000e6fc0320000000000000e5fc03110000',
+        ),
+    )
+
+    def test_vecteurs_liblzo2(self):
+        for nom, niveau, compresse in self.VECTEURS:
+            attendu = _lzo_source(nom)
+            with self.subTest(nom=nom, niveau=niveau):
+                self.assertEqual(_lzo1x_decompress(bytes.fromhex(compresse), len(attendu)), attendu)
+
+    def test_taille_inattendue_refusee(self):
+        nom, _, compresse = self.VECTEURS[2]
+        with self.assertRaises(ValueError):
+            _lzo1x_decompress(bytes.fromhex(compresse), len(_lzo_source(nom)) + 1)
+        with self.assertRaises(ValueError):
+            _lzo1x_decompress(bytes.fromhex(compresse), len(_lzo_source(nom)) - 1)
+
+    def test_flux_tronque_refuse(self):
+        for nom, _, compresse in self.VECTEURS:
+            flux = bytes.fromhex(compresse)
+            with self.subTest(nom=nom), self.assertRaises(ValueError):
+                _lzo1x_decompress(flux[: len(flux) // 2], len(_lzo_source(nom)))
+
+    def test_reference_avant_le_debut_refusee(self):
+        # 0x40 (M2, distance 1) en tout premier code : rien à recopier encore.
+        with self.assertRaises(ValueError):
+            _lzo1x_decompress(bytes([0x40, 0x00, 0x11, 0x00, 0x00]), 4)
+
+
+class UltraTests(unittest.IsolatedAsyncioTestCase):
+    """Rectangle Ultra (9) : U32 taille + pixels bruts en LZO1X (ultra.c)."""
+
+    @staticmethod
+    def _ultra_rect(width: int, height: int, compresse: bytes) -> bytes:
+        header = (0).to_bytes(2, 'big') * 2 + width.to_bytes(2, 'big') + height.to_bytes(2, 'big')
+        return (
+            header
+            + Enc.ULTRA.value.to_bytes(4, 'big')
+            + len(compresse).to_bytes(4, 'big')
+            + compresse
+        )
+
+    async def test_rectangle_ultra_decode(self):
+        nom, _, compresse = next(v for v in Lzo1xTests.VECTEURS if v[0] == 'pixels')
+        pixels = _lzo_source(nom)  # 4096 octets = 32x32 pixels x 4
+        video = make_video(width=32, height=32)
+        video.reader = _reader_from(self._ultra_rect(32, 32, bytes.fromhex(compresse)))
+        await video.read()
+        attendu = np.ndarray((32, 32, 4), 'B', pixels)
+        self.assertTrue((video.data[0:32, 0:32, :3] == attendu[..., :3]).all())
+
+    async def test_rectangle_ultra_taille_incoherente(self):
+        _, _, compresse = next(v for v in Lzo1xTests.VECTEURS if v[0] == 'pixels')
+        video = make_video(width=32, height=16)
+        video.reader = _reader_from(self._ultra_rect(32, 16, bytes.fromhex(compresse)))
+        with self.assertRaises(ValueError):
+            await video.read()
+
+    def test_ultra_hors_des_encodages_par_defaut(self):
+        self.assertEqual(Enc.ULTRA.value, 9)
+        self.assertNotIn(Enc.ULTRA, list(Enc.default()))
 
 
 class SendSetDesktopSizeTests(unittest.IsolatedAsyncioTestCase):
@@ -696,6 +809,20 @@ class SaslNegotiateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(clientout_padded[-1], 0)
         # RFC 4616 : authzid (vide) NUL authcid NUL passwd
         self.assertEqual(clientout, b'\x00mathilde\x00s3cret')
+
+    async def test_fermeture_avant_la_liste_de_mecanismes(self):
+        # Comportement réel de QEMU 10.2 (issue #32) : aucun mécanisme commun
+        # -> connexion fermée sans liste. Message explicite, pas IncompleteReadError.
+        with self.assertRaises(ConnectionError) as ctx:
+            await asyncvnc2._sasl_negotiate(_reader_from(b''), _FakeWriter(), 'u', 'p')
+        self.assertIn('X509SASL', str(ctx.exception))
+
+    async def test_fermeture_apres_plain_est_un_refus(self):
+        # QEMU ferme la connexion sur mauvais mot de passe (vérifié 2026-10-10).
+        mechlist = b'PLAIN'
+        reader = _reader_from(len(mechlist).to_bytes(4, 'big') + mechlist)
+        with self.assertRaises(PermissionError):
+            await asyncvnc2._sasl_negotiate(reader, _FakeWriter(), 'alice', 'mauvais')
 
     async def test_anonymous_used_when_plain_not_offered(self):
         mechlist = b'ANONYMOUS'
