@@ -95,6 +95,11 @@ testés contre un vrai serveur tiers, x11vnc/libvncserver (`-rfbversion
 CI « Serveur réel (x11vnc) », aucune modification de code. Voir
 `docs/sessions/session-22-2026-10-10.md`.
 
+**2026-10-10 (2)** : encodage Ultra (9) implémenté (#24) : décodeur LZO1X
+pur Python `_lzo1x_decompress()`, vérifié contre liblzo2 et contre un vrai
+x11vnc (image identique au Raw). Opt-in, hors `Enc.default()`. Voir
+`docs/sessions/session-23-2026-10-10.md`.
+
 ## Prochaine feature / prochaine session
 
 Plus aucun point 🟠 Moyenne restant. Les huit derniers 🟢 traités

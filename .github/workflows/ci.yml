@@ -63,9 +63,9 @@ jobs:
       - name: x11vnc et Xvfb
         run: |
           SUDO=""; if [ "$(id -u)" != "0" ]; then SUDO="sudo"; fi
-          if ! command -v x11vnc >/dev/null || ! command -v Xvfb >/dev/null; then
+          if ! command -v x11vnc >/dev/null || ! command -v Xvfb >/dev/null || ! command -v xsetroot >/dev/null; then
             $SUDO apt-get update
-            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y x11vnc xvfb
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y x11vnc xvfb x11-xserver-utils
           fi
           x11vnc -version
 
