@@ -295,19 +295,24 @@ d'audit » et « Confirmation avant commande xvp destructive » ci-dessus.
   mécaniques différentes) — voir la ligne dédiée dans « Transport /
   autres extensions » ci-dessus et `docs/sessions/session-14-2026-09-13.md`
   pour le détail complet.
-- Reconnexion inversée (`listen()`) : test réel contre un vrai serveur
-  VNC qui initie la connexion (ex. `Xvnc` + `vncconfig -connect`, ou
-  UltraVNC `-connect`) pour confirmer que ça fonctionne aussi hors
-  sandbox, en particulier à travers un vrai NAT/pare-feu (le cas d'usage
-  principal de cette fonctionnalité) — le sandbox ne peut tester qu'en
-  loopback.
-- Repli de version de protocole : test réel contre un authentique
-  serveur 3.3 (ex. une très vieille RealVNC/Xvnc, ou un iLO/iDRAC/IPMI
-  qui n'a jamais été mis à jour) pour confirmer que le repli fonctionne
-  aussi hors des scénarios fabriqués à la main testés ici — risque jugé
-  faible (format entièrement issu de la RFC officielle avec 7 scénarios
-  déjà vérifiés de bout en bout sur de vrais sockets), mais un vrai
-  serveur 3.3 reste la seule vérification qui manque.
+- Reconnexion inversée (`listen()`) : ✅ **2026-10-10 (issue #27)** —
+  testée contre un vrai serveur qui initie la connexion, `x11vnc
+  -connect_or_exit` (libvncserver) : RFB 3.8 et 3.3, sans mot de passe et
+  avec VNC Authentication, mauvais mot de passe rejeté
+  (`test_live_x11vnc.py`, job CI « Serveur réel »). Reste non vérifié : la
+  traversée d'un vrai NAT/pare-feu, le sandbox et les runners ne testant
+  qu'en loopback.
+- ~~Repli de version de protocole : test réel contre un authentique
+  serveur 3.3~~ ✅ **2026-10-10 (issue #28)** — x11vnc 0.9.17
+  (libvncserver) avec `-rfbversion 3.3` / `3.7` envoie réellement
+  `RFB 003.003` / `RFB 003.007` (vérifié sur le socket) et conduit la
+  sécurité propre à chaque version. Repli 3.3 (type de sécurité imposé
+  par le serveur) et 3.7 (sans SecurityResult après None) réussis, avec
+  et sans VNC Authentication, mauvais mot de passe rejeté
+  (`PermissionError`), capture d'écran lue dans chaque cas. Aucune
+  modification de code nécessaire. Ce n'est pas un « très vieux » serveur
+  natif 3.3 (iLO/iDRAC), mais une implémentation tierce indépendante du
+  flux 3.3, ce qui manquait aux 7 scénarios fabriqués à la main.
 - Nettoyage style (`ruff check`/`ruff format`) — **2026-09-02** : sous-ensemble
   sûr appliqué et vérifié (tri des imports, 3 corrections lint triviales,
   un `Optional` implicite rendu explicite ; zéro changement de
