@@ -810,6 +810,20 @@ class SaslNegotiateTests(unittest.IsolatedAsyncioTestCase):
         # RFC 4616 : authzid (vide) NUL authcid NUL passwd
         self.assertEqual(clientout, b'\x00mathilde\x00s3cret')
 
+    async def test_fermeture_avant_la_liste_de_mecanismes(self):
+        # Comportement réel de QEMU 10.2 (issue #32) : aucun mécanisme commun
+        # -> connexion fermée sans liste. Message explicite, pas IncompleteReadError.
+        with self.assertRaises(ConnectionError) as ctx:
+            await asyncvnc2._sasl_negotiate(_reader_from(b''), _FakeWriter(), 'u', 'p')
+        self.assertIn('X509SASL', str(ctx.exception))
+
+    async def test_fermeture_apres_plain_est_un_refus(self):
+        # QEMU ferme la connexion sur mauvais mot de passe (vérifié 2026-10-10).
+        mechlist = b'PLAIN'
+        reader = _reader_from(len(mechlist).to_bytes(4, 'big') + mechlist)
+        with self.assertRaises(PermissionError):
+            await asyncvnc2._sasl_negotiate(reader, _FakeWriter(), 'alice', 'mauvais')
+
     async def test_anonymous_used_when_plain_not_offered(self):
         mechlist = b'ANONYMOUS'
         server_bytes = (

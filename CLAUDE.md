@@ -100,6 +100,11 @@ pur Python `_lzo1x_decompress()`, vérifié contre liblzo2 et contre un vrai
 x11vnc (image identique au Raw). Opt-in, hors `Enc.default()`. Voir
 `docs/sessions/session-23-2026-10-10.md`.
 
+**2026-10-10 (3)** : SASL testé contre un vrai QEMU 10.2 (#32). Ajout des
+sous-types VeNCrypt X509SASL (263) et TLSSASL (264) ; PLAIN ne fonctionne
+qu'en X509SASL. `test_live_qemu_sasl.py`. Voir
+`docs/sessions/session-24-2026-10-10.md`.
+
 ## Prochaine feature / prochaine session
 
 Plus aucun point 🟠 Moyenne restant. Les huit derniers 🟢 traités
