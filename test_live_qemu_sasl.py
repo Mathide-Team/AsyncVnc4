@@ -29,6 +29,19 @@ OUTILS = all(shutil.which(o) for o in ('qemu-system-x86_64', 'saslpasswd2', 'ope
 EXIGE = os.environ.get('ASYNCVNC_LIVE') == '1'
 UTILISATEUR, MOT_DE_PASSE = 'alice', 'secret12'
 
+# Groupe ffdhe2048 de la RFC 7919 (paramètres publics, figés ici : `openssl
+# genpkey -pkeyopt group:ffdhe2048` n'existe pas sur l'OpenSSL des runners).
+FFDHE2048_PEM = """\
+-----BEGIN DH PARAMETERS-----
+MIIBCAKCAQEA//////////+t+FRYortKmq/cViAnPTzx2LnFg84tNpWp4TZBFGQz
++8yTnc4kmz75fS/jY2MMddj2gbICrsRhetPfHtXV/WVhJDP1H18GbtCFY2VVPe0a
+87VXE15/V8k1mE8McODmi3fipona8+/och3xWKE2rec1MKzKT0g6eXq8CrGCsyT7
+YdEIqUuyyOP7uWrat2DX9GgdT0Kj3jlN9K5W7edjcrsZCwenyO4KbXCeAvzhzffi
+7MA0BM0oNC9hkXL+nOmFg/+OTxIy7vKBg8P+OxtMb61zO7X8vC7CIAXFjvGDfRaD
+ssbzSibBsu/6iGtCOGEoXJf//////////wIBAg==
+-----END DH PARAMETERS-----
+"""
+
 
 def _port_libre() -> int:
     with socket.socket() as s:
@@ -78,11 +91,11 @@ class TestQemuSasl(unittest.TestCase):
                  '-CAkey', f'{p}/ca-key.pem', '-CAcreateserial', '-out', f'{p}/server-cert.pem',
                  '-days', '2', '-extfile', f'{p}/ext.cnf')  # fmt: skip
         # TLS anonyme : sans dh-params.pem, GnuTLS 3.8 refuse la poignée de
-        # main (« Insufficient credentials ») ; groupe RFC 7919 instantané.
+        # main (« Insufficient credentials »).
         cls.anon = os.path.join(d, 'anon')
         os.mkdir(cls.anon)
-        _openssl('genpkey', '-genparam', '-algorithm', 'DH', '-pkeyopt', 'group:ffdhe2048',
-                 '-out', f'{cls.anon}/dh-params.pem')  # fmt: skip
+        with open(f'{cls.anon}/dh-params.pem', 'w', encoding='ascii') as f:
+            f.write(FFDHE2048_PEM)
         cls.qemus: list[subprocess.Popen] = []
 
     @classmethod
