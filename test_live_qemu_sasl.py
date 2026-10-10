@@ -7,7 +7,7 @@ NOPLAINTEXT, NOANONYMOUS) : PLAIN disparaît de la liste. Les tests couvrent
 les deux côtés : le chemin qui marche et les refus explicites.
 
 Requiert `qemu-system-x86_64`, `saslpasswd2` (sasl2-bin), le module Cyrus
-PLAIN et sasldb (libsasl2-modules) et `openssl`. Sans eux, la suite est
+PLAIN et sasldb (libsasl2-modules). Sans eux, la suite est
 sautée, sauf si `ASYNCVNC_LIVE=1`.
 """
 
@@ -25,7 +25,7 @@ import unittest
 
 import asyncvnc2
 
-OUTILS = all(shutil.which(o) for o in ('qemu-system-x86_64', 'saslpasswd2', 'openssl'))
+OUTILS = all(shutil.which(o) for o in ('qemu-system-x86_64', 'saslpasswd2'))
 EXIGE = os.environ.get('ASYNCVNC_LIVE') == '1'
 UTILISATEUR, MOT_DE_PASSE = 'alice', 'secret12'
 
@@ -49,19 +49,91 @@ def _port_libre() -> int:
         return s.getsockname()[1]
 
 
-def _openssl(*args: str) -> None:
-    subprocess.run(['openssl', *args], check=True, capture_output=True)
+def _ecrire_pki(dossier: str) -> None:
+    import datetime
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    maintenant = datetime.datetime.now(datetime.timezone.utc)
+    debut, fin = maintenant - datetime.timedelta(hours=1), maintenant + datetime.timedelta(days=2)
+
+    def nom(cn: str) -> x509.Name:
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+
+    def usage(signature: bool, chiffrement: bool, signe_certs: bool) -> x509.KeyUsage:
+        return x509.KeyUsage(
+            digital_signature=signature,
+            content_commitment=False,
+            key_encipherment=chiffrement,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=signe_certs,
+            crl_sign=signe_certs,
+            encipher_only=False,
+            decipher_only=False,
+        )
+
+    cle_ca = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca = (
+        x509.CertificateBuilder()
+        .subject_name(nom('Test CA'))
+        .issuer_name(nom('Test CA'))
+        .public_key(cle_ca.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(debut)
+        .not_valid_after(fin)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(usage(False, False, True), critical=True)
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(cle_ca.public_key()), critical=False
+        )
+        .sign(cle_ca, hashes.SHA256())
+    )
+    cle = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    serveur = (
+        x509.CertificateBuilder()
+        .subject_name(nom('127.0.0.1'))
+        .issuer_name(ca.subject)
+        .public_key(cle.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(debut)
+        .not_valid_after(fin)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(usage(True, True, False), critical=True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(cle_ca.public_key()), critical=False
+        )
+        .sign(cle_ca, hashes.SHA256())
+    )
+    pem = serialization.Encoding.PEM
+    with open(os.path.join(dossier, 'ca-cert.pem'), 'wb') as f:
+        f.write(ca.public_bytes(pem))
+    with open(os.path.join(dossier, 'server-cert.pem'), 'wb') as f:
+        f.write(serveur.public_bytes(pem))
+    with open(os.path.join(dossier, 'server-key.pem'), 'wb') as f:
+        f.write(
+            cle.private_bytes(
+                pem, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()
+            )
+        )
 
 
-@unittest.skipUnless(
-    OUTILS or EXIGE, 'QEMU/sasl2-bin/openssl absents (ASYNCVNC_LIVE=1 pour exiger)'
-)
+@unittest.skipUnless(OUTILS or EXIGE, 'QEMU/sasl2-bin absents (ASYNCVNC_LIVE=1 pour exiger)')
 class TestQemuSasl(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not OUTILS:
             raise AssertionError(
-                'ASYNCVNC_LIVE=1 mais qemu-system-x86_64, saslpasswd2 ou openssl est absent'
+                'ASYNCVNC_LIVE=1 mais qemu-system-x86_64 ou saslpasswd2 est absent'
             )
         cls.tmp = tempfile.TemporaryDirectory()
         d = cls.tmp.name
@@ -72,24 +144,13 @@ class TestQemuSasl(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        # PKI : CA (keyUsage exigé par Python >= 3.13) + certificat serveur 127.0.0.1.
+        # PKI : générée avec `cryptography` (dépendance du projet) plutôt
+        # qu'avec openssl : la CA produite par OpenSSL 1.1.1f (runners focal)
+        # est refusée par la GnuTLS de QEMU 4.2 (« Unable to import CA
+        # certificate list »). keyUsage sur la CA : exigé par Python >= 3.13.
         cls.pki = os.path.join(d, 'pki')
         os.mkdir(cls.pki)
-        p = cls.pki
-        _openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', f'{p}/ca-key.pem',
-                 '-out', f'{p}/ca-cert.pem', '-days', '2', '-subj', '/CN=Test CA',
-                 '-addext', 'basicConstraints=critical,CA:TRUE',
-                 '-addext', 'keyUsage=critical,keyCertSign,cRLSign')  # fmt: skip
-        _openssl('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', f'{p}/server-key.pem',
-                 '-out', f'{p}/server.csr', '-subj', '/CN=127.0.0.1')  # fmt: skip
-        with open(f'{p}/ext.cnf', 'w', encoding='ascii') as f:
-            f.write(
-                'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n'
-                'keyUsage=critical,digitalSignature,keyEncipherment\nbasicConstraints=CA:FALSE\n'
-            )
-        _openssl('x509', '-req', '-in', f'{p}/server.csr', '-CA', f'{p}/ca-cert.pem',
-                 '-CAkey', f'{p}/ca-key.pem', '-CAcreateserial', '-out', f'{p}/server-cert.pem',
-                 '-days', '2', '-extfile', f'{p}/ext.cnf')  # fmt: skip
+        _ecrire_pki(cls.pki)
         # TLS anonyme : sans dh-params.pem, GnuTLS 3.8 refuse la poignée de
         # main (« Insufficient credentials »).
         cls.anon = os.path.join(d, 'anon')
@@ -124,23 +185,26 @@ class TestQemuSasl(unittest.TestCase):
         elif tls == 'anon':
             args = ['-object', f'tls-creds-anon,id=tls0,dir={self.anon},endpoint=server']
             vnc += ',tls-creds=tls0'
+        journal = open(os.path.join(conf, 'qemu.log'), 'wb')  # noqa: SIM115
         q = subprocess.Popen(
             ['qemu-system-x86_64', '-display', 'none', '-nodefaults', '-vga', 'std', '-m', '32',
              *args, '-vnc', vnc],
             env={**os.environ, 'SASL_CONF_PATH': conf},
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=journal,
+            stderr=subprocess.STDOUT,
         )  # fmt: skip
+        journal.close()
         self.qemus.append(q)
         fin = time.monotonic() + 15
-        while time.monotonic() < fin:
+        while time.monotonic() < fin and q.poll() is None:
             try:
                 with socket.create_connection(('127.0.0.1', port), timeout=0.5):
                     return port
             except OSError:
                 time.sleep(0.2)
-        raise TimeoutError('QEMU ne répond pas')
+        with open(os.path.join(conf, 'qemu.log'), encoding='utf-8', errors='replace') as f:
+            raise TimeoutError(f'QEMU ne répond pas (code {q.poll()}) : {f.read()[-2000:]}')
 
     def _connect(self, port: int, user: str, pw: str, ca: bool = True):
         ctx = ssl.create_default_context(cafile=f'{self.pki}/ca-cert.pem') if ca else None
@@ -178,7 +242,8 @@ class TestQemuSasl(unittest.TestCase):
 
     def test_sasl_sans_tls_plain_retire(self):
         port = self._qemu('plain', None)
-        with self.assertRaises(ConnectionError) as ctx:
+        # QEMU >= 10 ferme la connexion ; QEMU 4.2 envoie une liste vide.
+        with self.assertRaises((ConnectionError, ValueError)) as ctx:
             self._connect(port, UTILISATEUR, MOT_DE_PASSE, ca=False)
         self.assertIn('X509SASL', str(ctx.exception))
 
@@ -190,7 +255,7 @@ class TestQemuSasl(unittest.TestCase):
 
     def test_tlssasl_anonyme_plain_retire(self):
         port = self._qemu('plain', 'anon')
-        with self.assertRaises(ConnectionError):
+        with self.assertRaises((ConnectionError, ValueError)):
             self._connect(port, UTILISATEUR, MOT_DE_PASSE, ca=False)
 
 

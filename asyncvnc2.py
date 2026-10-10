@@ -406,7 +406,12 @@ async def _sasl_negotiate(
     mechlist = (await reader.readexactly(mechlist_length)).decode('ascii')
     mechanisms = set(mechlist.split(',')) if mechlist else set()
     if not mechanisms:
-        raise ValueError('SASL: server offered no mechanisms')
+        # QEMU 4.2 (vérifié 2026-10-11) envoie une liste vide là où QEMU 10
+        # ferme la connexion (voir ci-dessus) : même cause, même conseil.
+        raise ValueError(
+            'SASL: server offered no mechanisms (QEMU ne propose PLAIN/ANONYMOUS '
+            "qu'en VeNCrypt X509SASL : tls-creds-x509 + sasl=on)"
+        )
 
     if 'PLAIN' in mechanisms and username is not None and password is not None:
         # RFC 4616 : authzid NUL authcid NUL passwd -- authzid vide (on
