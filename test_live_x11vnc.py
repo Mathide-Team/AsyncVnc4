@@ -5,7 +5,7 @@ initiée par un vrai serveur, `x11vnc -connect_or_exit`). Contrairement à
 `test_asyncvnc2.py`, aucun serveur n'est fabriqué à la main : x11vnc écrit
 lui-même `RFB 003.003`, `003.007` ou `003.008` et conduit la sécurité.
 
-Requiert `x11vnc` et `Xvfb`. Sans eux, la suite est sautée, sauf si
+Requiert `x11vnc`, `Xvfb` et `xsetroot`. Sans eux, la suite est sautée, sauf si
 `ASYNCVNC_LIVE=1` (job CI dédié) : l'absence devient alors un échec.
 """
 
@@ -20,9 +20,11 @@ import tempfile
 import time
 import unittest
 
+import numpy as np
+
 import asyncvnc2
 
-OUTILS = all(shutil.which(o) for o in ('x11vnc', 'Xvfb'))
+OUTILS = all(shutil.which(o) for o in ('x11vnc', 'Xvfb', 'xsetroot'))
 EXIGE = os.environ.get('ASYNCVNC_LIVE') == '1'
 MOT_DE_PASSE = 'secret12'
 
@@ -51,7 +53,7 @@ class TestX11vnc(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not OUTILS:
-            raise AssertionError('ASYNCVNC_LIVE=1 mais x11vnc ou Xvfb est absent')
+            raise AssertionError('ASYNCVNC_LIVE=1 mais x11vnc, Xvfb ou xsetroot est absent')
         cls.tmp = tempfile.TemporaryDirectory()
         cls.display = f':{_port_libre() % 1000 + 100}'
         cls.xvfb = subprocess.Popen(
@@ -145,6 +147,52 @@ class TestX11vnc(unittest.TestCase):
         port = self._serveur('-rfbversion', '3.7', '-rfbauth', self.pwfile)
         with self.assertRaises(PermissionError):
             self._connect(port, 'mauvais1')
+
+    # --- #24 : encodage Ultra (LZO) servi par libvncserver --------------
+
+    def _capture(self, port: int, encodings: list) -> tuple[np.ndarray, list]:
+        rects: list = []
+        original = asyncvnc2.Video.process_ultra
+
+        async def espion(video, reader, x, y, w, h):
+            rects.append((x, y, w, h))
+            return await original(video, reader, x, y, w, h)
+
+        async def scenario():
+            async with asyncvnc2.connect('127.0.0.1', port, encodings=encodings) as client:
+                return np.asarray(await asyncio.wait_for(client.screenshot(), 30)).copy()
+
+        asyncvnc2.Video.process_ultra = espion
+        try:
+            return asyncio.run(scenario()), rects
+        finally:
+            asyncvnc2.Video.process_ultra = original
+
+    def test_ultra_identique_au_raw(self):
+        # Contenu non uniforme (motif de xsetroot) : une image noire ne
+        # prouverait rien sur le décodage LZO des correspondances.
+        subprocess.run(
+            [
+                'xsetroot',
+                '-display',
+                self.display,
+                '-mod',
+                '7',
+                '5',
+                '-fg',
+                'orange',
+                '-bg',
+                'navy',
+            ],
+            check=True,
+        )
+        port = self._serveur()
+        ultra, rects = self._capture(port, [asyncvnc2.Enc.ULTRA])
+        raw, _ = self._capture(port, [asyncvnc2.Enc.RAW])
+        self.assertTrue(rects, "le serveur n'a envoyé aucun rectangle Ultra")
+        self.assertGreaterEqual(sum(w * h for _, _, w, h in rects), 320 * 240)
+        self.assertGreater(len(np.unique(ultra[..., :3].reshape(-1, 3), axis=0)), 1)
+        self.assertTrue(np.array_equal(ultra[..., :3], raw[..., :3]))
 
     # --- #27 : connexion inversée initiée par un vrai serveur ----------
 
