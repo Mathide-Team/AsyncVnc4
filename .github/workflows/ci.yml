@@ -10,7 +10,7 @@ name: CI
 jobs:
   quality:
     name: Qualité (lint, format, tests)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '{"group":"maison","labels":["self-hosted","linux"]}') }}
 
     steps:
       - name: Checkout du dépôt
@@ -28,12 +28,63 @@ jobs:
         run: uv sync
 
       - name: Lint (ruff check)
-        run: uv run ruff check asyncvnc2.py test_asyncvnc2.py
+        run: uv run ruff check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py
 
       - name: Formatage (ruff format --check)
-        run: uv run ruff format --check asyncvnc2.py test_asyncvnc2.py
+        run: uv run ruff format --check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py
 
       - name: Tests (unittest)
         # Suite documentée dans CLAUDE.md « Commandes de qualité » :
         # 50 tests, aucun vrai serveur VNC nécessaire.
         run: uv run python3 -m unittest test_asyncvnc2 -v
+
+  live:
+    # Issues #28 et #27 : repli de version et connexion inversée contre un
+    # vrai serveur tiers (x11vnc / libvncserver). ASYNCVNC_LIVE=1 : un
+    # x11vnc ou un Xvfb absent fait échouer le job au lieu de le sauter.
+    name: Serveur réel (x11vnc)
+    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '{"group":"maison","labels":["self-hosted","linux"]}') }}
+
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v7
+
+      - name: Installation de uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Installation de Python
+        run: uv python install
+
+      - name: Installation des dépendances
+        run: uv sync
+
+      - name: x11vnc et Xvfb
+        run: |
+          SUDO=""; if [ "$(id -u)" != "0" ]; then SUDO="sudo"; fi
+          if ! command -v x11vnc >/dev/null || ! command -v Xvfb >/dev/null || ! command -v xsetroot >/dev/null; then
+            $SUDO apt-get update
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y x11vnc xvfb x11-xserver-utils
+          fi
+          x11vnc -version
+
+      - name: Tests contre x11vnc
+        env:
+          ASYNCVNC_LIVE: "1"
+        run: uv run python3 -m unittest test_live_x11vnc -v
+
+      - name: QEMU et Cyrus SASL
+        run: |
+          SUDO=""; if [ "$(id -u)" != "0" ]; then SUDO="sudo"; fi
+          if ! command -v qemu-system-x86_64 >/dev/null || ! command -v saslpasswd2 >/dev/null; then
+            $SUDO apt-get update
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              qemu-system-x86 sasl2-bin libsasl2-modules openssl
+          fi
+          qemu-system-x86_64 --version | head -1
+
+      - name: Tests SASL contre QEMU
+        env:
+          ASYNCVNC_LIVE: "1"
+        run: uv run python3 -m unittest test_live_qemu_sasl -v

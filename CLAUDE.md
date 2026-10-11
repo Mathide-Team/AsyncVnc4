@@ -89,6 +89,22 @@ version minimale n'est pas confirmée par qui déploie ce fichier.
 
 Détail complet des 23 patches et de leur statut : @docs/features-backlog.md
 
+**2026-10-10** : repli de version (#28) et connexion inversée (#27)
+testés contre un vrai serveur tiers, x11vnc/libvncserver (`-rfbversion
+3.3`/`3.7`, `-connect_or_exit`) : 10 tests dans `test_live_x11vnc.py`, job
+CI « Serveur réel (x11vnc) », aucune modification de code. Voir
+`docs/sessions/session-22-2026-10-10.md`.
+
+**2026-10-10 (2)** : encodage Ultra (9) implémenté (#24) : décodeur LZO1X
+pur Python `_lzo1x_decompress()`, vérifié contre liblzo2 et contre un vrai
+x11vnc (image identique au Raw). Opt-in, hors `Enc.default()`. Voir
+`docs/sessions/session-23-2026-10-10.md`.
+
+**2026-10-10 (3)** : SASL testé contre un vrai QEMU 10.2 (#32). Ajout des
+sous-types VeNCrypt X509SASL (263) et TLSSASL (264) ; PLAIN ne fonctionne
+qu'en X509SASL. `test_live_qemu_sasl.py`. Voir
+`docs/sessions/session-24-2026-10-10.md`.
+
 ## Prochaine feature / prochaine session
 
 Plus aucun point 🟠 Moyenne restant. Les huit derniers 🟢 traités
