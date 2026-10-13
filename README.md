@@ -41,7 +41,7 @@ uv run pytest test_asyncvnc2.py -v
 uv run ruff check asyncvnc2.py test_asyncvnc2.py
 ```
 
-Dépendances : `numpy`, `loguru`, `cryptography`, `keysymdef`. Python >= 3.10.
+Dépendances : `numpy`, `loguru`, `cryptography`, `keysymdef`. Python >= 3.9 (python3 système de RHEL/Rocky 9 compris, issue #35), vérifié en CI.
 
 ## Suivi des issues
 
