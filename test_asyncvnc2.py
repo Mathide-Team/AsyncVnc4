@@ -11,6 +11,8 @@ serveur VNC.
 Lancer avec : python3 -m unittest test_asyncvnc2 -v
 """
 
+from __future__ import annotations
+
 import asyncio
 import unittest
 import zlib

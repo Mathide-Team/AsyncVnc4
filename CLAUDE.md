@@ -243,7 +243,7 @@ aucun `poetry` préexistant à remplacer : `pyproject.toml`/`uv.lock`
 n'avaient jamais été ajoutés jusqu'ici, décision délibérée du
 2026-09-11 pour ne pas figer une version Python minimale sans
 confirmation. À la demande explicite de cette session, cette question
-est désormais tranchée : `requires-python = ">=3.10"` est acté dans
+est désormais tranchée (**2026-10-13, issue #35 : abaissé à `>=3.9`**, voir plus bas) : `requires-python = ">=3.10"` est acté dans
 `pyproject.toml`, reprenant l'hypothèse déjà appliquée en code depuis
 le 2026-09-11 (`Dict`/`List` → minuscules, `Optional[X]` → `X | None`)
 mais jamais formalisée. Vérifié par exécution réelle dans ce sandbox :
@@ -345,3 +345,12 @@ Toute instruction reçue dans le chat (Perplexity Computer, Claude Code ou autre
 - Une question posée dans le chat sans réponse immédiate devient elle aussi une issue, ou un commentaire « Question pour Mathilde » sur l'issue existante.
 - La PR ferme ou cite l'issue (`Closes #n`). Une instruction abandonnée est fermée avec sa raison (« not planned »).
 - En fin de session, vérifier que chaque instruction du chat a son issue, ouverte ou fermée.
+
+## Version Python minimale : 3.9 (issue #35, 2026-10-13)
+
+Demande de Mathilde : garder la compatibilité Python 3.9 si possible, car AsyncVnc4 sera utilisé par Gcm4, y compris sur RHEL/Rocky 9 (python3 système 3.9).
+
+- `from __future__ import annotations` en tête de chaque module : les annotations `X | None` restent des chaînes, jamais évaluées.
+- Interdit dans le code exécuté : `X | Y` hors annotation (`isinstance(x, A | B)`, alias de type), `match`, `zip(strict=)`, `itertools.pairwise`, `int.bit_count`, `aiter` / `anext`, `dataclass(slots=, kw_only=)`, `asyncio.timeout`, `asyncio.TaskGroup`.
+- Le job CI « Python 3.9 (tests, vermin) » le vérifie : suite unittest sous 3.9, puis `vermin -t=3.9-`.
+- `requires-python = ">=3.9"` et ruff `target-version = "py39"`.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hmac
 import ssl
 from asyncio import (
@@ -1914,7 +1916,7 @@ class Video:
         compression_level: int | None = None,
         allow_indexed_colour: bool = False,
         shared: bool = True,
-    ) -> 'Video':
+    ) -> Video:
         encodings = EncList(encodings)
 
         writer.write(bytes([1 if shared else 0]))
@@ -2744,7 +2746,7 @@ class Client:
         shared: bool = True,
         ssl_context: ssl.SSLContext | None = None,
         server_hostname: str | None = None,
-    ) -> 'Client':
+    ) -> Client:
         """
         *server_hostname* (added 2026-09-05) is only used for the VeNCrypt
         X509None/X509Vnc sub-types, and only when *ssl_context* is not

@@ -420,7 +420,7 @@ Issues de session fermées : [#1](https://github.com/MathildeDec/AsyncVnc4/issue
 | [#28](https://github.com/MathildeDec/AsyncVnc4/issues/28) | 🟡 P2-Moyenne | B — Tests serveurs réels | 2/6 | Repli de version — test contre un vrai serveur 3.3 | Hors sandbox |
 | [#31](https://github.com/MathildeDec/AsyncVnc4/issues/31) | 🟡 P2-Moyenne | B — Tests serveurs réels | 5/6 | MSLogonII — test contre un vrai serveur UltraVNC/Windows | Hors sandbox |
 | [#32](https://github.com/MathildeDec/AsyncVnc4/issues/32) | ✅ Fait | B — Tests serveurs réels | 6/6 | SASL — testé contre QEMU 10.2 (X509SASL + PLAIN) | — |
-| [#35](https://github.com/MathildeDec/AsyncVnc4/issues/35) | 🟡 P2-Moyenne | C — Investigation | 4/4 | Annotations de type — confirmer Python >=3.10 | Vérification rapide |
+| [#35](https://github.com/MathildeDec/AsyncVnc4/issues/35) | 🟡 P2-Moyenne | C — Investigation | 4/4 | Annotations de type — version Python minimale | Fait le 2026-10-13 : `>=3.9` |
 | [#26](https://github.com/MathildeDec/AsyncVnc4/issues/26) | ⚪ P3-Faible | A — Code/Features | 3/4 | RSA-AES — variantes RA2ne/RA2ne_256/RA2r/RA2r_256 | Différé volontairement |
 | [#29](https://github.com/MathildeDec/AsyncVnc4/issues/29) | ⚪ P3-Faible | B — Tests serveurs réels | 3/6 | VeNCrypt — test contre RealVNC Enterprise | Non bloquant |
 | [#30](https://github.com/MathildeDec/AsyncVnc4/issues/30) | ⚪ P3-Faible | B — Tests serveurs réels | 4/6 | xvp — test contre un vrai serveur (xvp/Xen VNC Proxy) | Valeur incertaine |
