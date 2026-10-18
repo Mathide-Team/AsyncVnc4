@@ -3,7 +3,7 @@ name = "asyncvnc2"
 version = "0.1.0"
 description = "Fork maison d'asyncvnc (client/serveur RFB pur Python, VNC) avec patches xvp, listen(), repli de version, VeNCrypt, WebSockets, Extended Clipboard, RSA-AES"
 readme = "docs/reference/downstream-consumer.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.24",
     "loguru>=0.7",
@@ -18,7 +18,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py39"
 
 [tool.ruff.format]
 quote-style = "single"

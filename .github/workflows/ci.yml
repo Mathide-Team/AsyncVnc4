@@ -38,6 +38,34 @@ jobs:
         # 50 tests, aucun vrai serveur VNC nécessaire.
         run: uv run python3 -m unittest test_asyncvnc2 -v
 
+  python39:
+    # Issue #35 : Python 3.9 reste pris en charge (python3 système de
+    # RHEL/Rocky 9, cible de Gcm4). `from __future__ import annotations`
+    # garde les annotations `X | None` en chaînes ; vermin vérifie qu'aucune
+    # API de la bibliothèque standard postérieure à 3.9 n'est utilisée.
+    name: Python 3.9 (tests, vermin)
+    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '{"group":"maison","labels":["self-hosted","linux"]}') }}
+
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v7
+
+      - name: Installation de uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Python 3.9 et dépendances
+        run: |
+          uv python install 3.9
+          uv sync -p 3.9
+
+      - name: Tests (unittest, Python 3.9)
+        run: uv run -p 3.9 python3 -m unittest test_asyncvnc2 -v
+
+      - name: Version minimale (vermin)
+        run: uvx vermin --no-tips --eval-annotations -t=3.9- --violations asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py test_live_qemu_sasl.py
+
   live:
     # Issues #28 et #27 : repli de version et connexion inversée contre un
     # vrai serveur tiers (x11vnc / libvncserver). ASYNCVNC_LIVE=1 : un
