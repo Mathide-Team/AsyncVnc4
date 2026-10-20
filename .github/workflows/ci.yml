@@ -70,10 +70,23 @@ jobs:
     # Issues #28 et #27 : repli de version et connexion inversée contre un
     # vrai serveur tiers (x11vnc / libvncserver). ASYNCVNC_LIVE=1 : un
     # x11vnc ou un Xvfb absent fait échouer le job au lieu de le sauter.
+    # Issue #48 : job en conteneur (même patron que Netcross) — la VM
+    # `ubuntu` du groupe maison a le label `docker` et exécute les jobs en
+    # conteneur, où l'installation des paquets se fait en root sans sudo ;
+    # repli ubuntu-latest (dépôt public, minutes gratuites).
     name: Serveur réel (x11vnc)
-    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '{"group":"maison","labels":["self-hosted","linux"]}') }}
+    runs-on: ${{ fromJSON(vars.RUNS_ON_DOCKER || '"ubuntu-latest"') }}
+    container:
+      image: ubuntu:26.04
 
     steps:
+      - name: Prérequis du conteneur (git, certificats)
+        # ubuntu:26.04 est une image minimale : ni git (checkout), ni
+        # certificats (clonage HTTPS).
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates
+
       - name: Checkout du dépôt
         uses: actions/checkout@v7
 
