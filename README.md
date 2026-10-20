@@ -60,3 +60,7 @@ Ce dépôt fait partie de l'écosystème Gcm4 :
 Roadmap d'intégration : [Gcm4 #106](https://github.com/MathildeDec/Gcm4/issues/106)
 Tableau de bord : [Gcm4 #107](https://github.com/MathildeDec/Gcm4/issues/107)
 Annonce du projet : [Gcm4 #102](https://github.com/MathildeDec/Gcm4/issues/102)
+
+## Licence
+
+GPL-3.0 — le fichier `LICENSE` est celui de l'original (`asyncvnc` de Barney Gale, dont ce dépôt dérive via `asyncvnc2` d'andrews239). Le relicence en MIT est impossible : l'œuvre dérivée d'un programme GPL-3.0 reste GPL-3.0 (exception assumée dans l'audit du socle, `.github#1`).
