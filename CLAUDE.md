@@ -233,7 +233,9 @@ suspens.
 
 ```bash
 uv sync                                          # crée .venv/, installe numpy/loguru/cryptography/keysymdef + ruff (dev)
-uv run python3 -m unittest test_asyncvnc2 -v     # 50 tests
+uv run python3 -m unittest test_asyncvnc2 -v     # 62 tests
+uv run python3 -m unittest test_loguru_regles -v # 25 tests, règles de journalisation (issue #55)
+uv run python3 scripts/audit_debug_sorties.py    # 0 fonction non conforme (référence : 0)
 uv run ruff check asyncvnc2.py test_asyncvnc2.py # 0 signalement
 ```
 
@@ -354,3 +356,12 @@ Demande de Mathilde : garder la compatibilité Python 3.9 si possible, car Async
 - Interdit dans le code exécuté : `X | Y` hors annotation (`isinstance(x, A | B)`, alias de type), `match`, `zip(strict=)`, `itertools.pairwise`, `int.bit_count`, `aiter` / `anext`, `dataclass(slots=, kw_only=)`, `asyncio.timeout`, `asyncio.TaskGroup`.
 - Le job CI « Python 3.9 (tests, vermin) » le vérifie : suite unittest sous 3.9, puis `vermin -t=3.9-`.
 - `requires-python = ">=3.9"` et ruff `target-version = "py39"`.
+
+## Journalisation loguru (issue #55, SOCLE §8, 2026-10-22)
+
+- `from loguru import logger` uniquement ; `import logging` interdit ; format `{}` (jamais `%s`).
+- `logger.debug()` à l'entrée de chaque fonction non triviale et avant chaque sortie (`return`, `raise` volontaire, fin implicite) ; `logger.trace()` sur les chemins chauds (par rectangle, tuile, message chiffré ou événement clavier/souris).
+- Avant chaque `raise` volontaire : l'exception exacte est journalisée (`_erreur = X(...)`, journal, `raise _erreur`), avec la cause d'origine quand elle existe.
+- Chaque `except` journalise la cause exacte.
+- Jamais de secret ni de contenu saisi : mot de passe, identifiant, clé d'hôte → `bool()` ; clés, presse-papiers, texte tapé → `len()` ; keysym/keycode jamais journalisés (enregistreur de frappes).
+- Contrôle : `test_loguru_regles.py` (règles AST) et `scripts/audit_debug_sorties.py` ; la référence `scripts/audit_debug_sorties.baseline` (0) ne peut que baisser.

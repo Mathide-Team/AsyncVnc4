@@ -79,8 +79,12 @@ _MAX_ALLOC_BYTES = 64 * 1024 * 1024
 
 
 def _check_alloc_size(n: int, what: str):
+    logger.trace('_check_alloc_size() appelée | n={} what={}', n, what)
     if n > _MAX_ALLOC_BYTES:
-        raise ValueError(f'{what}: taille annoncée ({n} octets) dépasse le plafond de sécurité')
+        _erreur = ValueError(f'{what}: taille annoncée ({n} octets) dépasse le plafond de sécurité')
+        logger.debug('_check_alloc_size() lève | {!r}', _erreur)
+        raise _erreur
+    logger.trace('_check_alloc_size() terminée')
 
 
 class Enc(Enum):
@@ -262,8 +266,10 @@ class EncList(list):
     """
 
     def __init__(self, iterable=None):
+        logger.debug('EncList.__init__() appelée')
         if iterable is None:
             super().__init__(Enc.default())
+            logger.debug('EncList.__init__() retourne')
             return
         super().__init__([])
         if isinstance(iterable, Enc):
@@ -274,21 +280,33 @@ class EncList(list):
                     if x not in self:
                         self.append(x)
                 else:
+                    logger.debug('EncList.__init__() élément hors Enc | type={}', type(x).__name__)
                     raise TypeError
-        except TypeError:
-            raise TypeError('Arg must be one of the None or the Enc or the iterable of Enc')
+        except TypeError as exc:
+            _erreur = TypeError('Arg must be one of the None or the Enc or the iterable of Enc')
+            logger.debug('EncList.__init__() lève | {!r} (cause : {!r})', _erreur, exc)
+            raise _erreur
+        logger.debug('EncList.__init__() terminée')
 
     def __add__(self, other):
+        logger.debug('EncList.__add__() appelée')
         if isinstance(other, Enc):
-            return EncList([other, *self])
-        return EncList([*other, *self])
+            _resultat = EncList([other, *self])
+            logger.debug('EncList.__add__() retourne | {} encodage(s)', len(_resultat))
+            return _resultat
+        _resultat = EncList([*other, *self])
+        logger.debug('EncList.__add__() retourne | {} encodage(s)', len(_resultat))
+        return _resultat
 
     def __sub__(self, other):
+        logger.debug('EncList.__sub__() appelée')
         if isinstance(other, Enc):
             other = [other]
         a = filter(lambda x: x not in other, self)
 
-        return EncList(a)
+        _resultat = EncList(a)
+        logger.debug('EncList.__sub__() retourne | {} encodage(s)', len(_resultat))
+        return _resultat
 
 
 async def read_int(reader: StreamReader, length: int) -> int:
@@ -304,21 +322,28 @@ async def read_text(reader: StreamReader, encoding: str) -> str:
     Reads, unpacks, and returns length-prefixed text.
     """
 
+    logger.trace('read_text() appelée | encoding={}', encoding)
     length = await read_int(reader, 4)
     data = await reader.readexactly(length)
-    return data.decode(encoding)
+    _resultat = data.decode(encoding)
+    logger.trace('read_text() retourne | {} caractère(s)', len(_resultat))
+    return _resultat
 
 
 def pack_ard(data):
+    logger.debug('pack_ard() appelée | len(data)={}', len(data))
     encoded = data.encode('utf-8')
     if len(encoded) > 63:
-        raise ValueError(
+        _erreur = ValueError(
             f'Identifiant/mot de passe Apple ARD trop long : {len(encoded)} '
             f'octets UTF-8 (63 maximum, terminateur nul compris dans les 64 '
             f'octets du champ protocolaire)'
         )
+        logger.debug('pack_ard() lève | {!r}', _erreur)
+        raise _erreur
     data = encoded + b'\x00'
     data += urandom(64 - len(data))
+    logger.debug('pack_ard() retourne | {} octet(s)', len(data))
     return data
 
 
@@ -333,15 +358,24 @@ def _pack_mslogonii_field(data: str, field_size: int, what: str) -> bytes:
     (Apple ARD), avec des tailles de champ différentes.
     """
 
+    logger.debug(
+        '_pack_mslogonii_field() appelée | len(data)={} field_size={} what={}',
+        len(data),
+        field_size,
+        what,
+    )
     encoded = data.encode('utf-8')
     if len(encoded) > field_size - 1:
-        raise ValueError(
+        _erreur = ValueError(
             f'{what} MSLogonII trop long : {len(encoded)} octets UTF-8 '
             f'({field_size - 1} maximum, terminateur nul compris dans les '
             f'{field_size} octets du champ protocolaire)'
         )
+        logger.debug('_pack_mslogonii_field() lève | {!r}', _erreur)
+        raise _erreur
     data = encoded + b'\x00'
     data += urandom(field_size - len(data))
+    logger.debug('_pack_mslogonii_field() retourne | {} octet(s)', len(data))
     return data
 
 
@@ -391,6 +425,9 @@ async def _sasl_negotiate(
     configuration Cyrus) : non vérifié contre un serveur réel.
     """
 
+    logger.debug(
+        '_sasl_negotiate() appelée | identifiant={} mot_de_passe={}', bool(username), bool(password)
+    )
     try:
         mechlist_length = await read_int(reader, 4)
     except IncompleteReadError as exc:
@@ -400,20 +437,24 @@ async def _sasl_negotiate(
         # VeNCrypt X509SASL (et socket Unix), QEMU exige un mécanisme qui
         # chiffre lui-même (min_ssf=56, NOPLAINTEXT, NOANONYMOUS) : PLAIN et
         # ANONYMOUS sont retirés en SASL seul **et** en TLSSASL (TLS anonyme).
-        raise ConnectionError(
+        _erreur = ConnectionError(
             'SASL: le serveur a fermé la connexion avant la liste des mécanismes '
             "(aucun mécanisme commun ? QEMU ne propose PLAIN/ANONYMOUS qu'en "
             'VeNCrypt X509SASL : tls-creds-x509 + sasl=on)'
-        ) from exc
+        )
+        logger.debug('_sasl_negotiate() lève | {!r} (cause : {!r})', _erreur, exc)
+        raise _erreur from exc
     mechlist = (await reader.readexactly(mechlist_length)).decode('ascii')
     mechanisms = set(mechlist.split(',')) if mechlist else set()
     if not mechanisms:
         # QEMU 4.2 (vérifié 2026-10-11) envoie une liste vide là où QEMU 10
         # ferme la connexion (voir ci-dessus) : même cause, même conseil.
-        raise ValueError(
+        _erreur = ValueError(
             'SASL: server offered no mechanisms (QEMU ne propose PLAIN/ANONYMOUS '
             "qu'en VeNCrypt X509SASL : tls-creds-x509 + sasl=on)"
         )
+        logger.debug('_sasl_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     if 'PLAIN' in mechanisms and username is not None and password is not None:
         # RFC 4616 : authzid NUL authcid NUL passwd -- authzid vide (on
@@ -428,11 +469,13 @@ async def _sasl_negotiate(
         chosen_mechanism = 'ANONYMOUS'
         clientout = (username or '').encode('utf-8')
     else:
-        raise ValueError(
+        _erreur = ValueError(
             f'SASL: aucun mécanisme pris en charge parmi {sorted(mechanisms)} '
             '(seuls PLAIN et ANONYMOUS sont implémentés ici -- les autres '
             'nécessiteraient une vraie bibliothèque SASL)'
         )
+        logger.debug('_sasl_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     mechname = chosen_mechanism.encode('ascii')
     # "If clientout-data is non-NULL, it should be extended by a single NUL
@@ -452,9 +495,11 @@ async def _sasl_negotiate(
     except IncompleteReadError as exc:
         # QEMU (vérifié 2026-10-10) refuse un mauvais mot de passe ou un
         # utilisateur inconnu en fermant la connexion, sans SecurityResult.
-        raise PermissionError(
+        _erreur = PermissionError(
             f'SASL {chosen_mechanism}: authentification refusée (connexion fermée par le serveur)'
-        ) from exc
+        )
+        logger.debug('_sasl_negotiate() lève | {!r} (cause : {!r})', _erreur, exc)
+        raise _erreur from exc
     await reader.readexactly(serverout_length)  # serverout-data, ignorée (voir docstring)
     complete_flag = await read_int(reader, 1)
     if complete_flag != 1:
@@ -464,10 +509,13 @@ async def _sasl_negotiate(
         # SASL client-step supplémentaire non prévue par ces deux
         # mécanismes et non implémentée ici, plutôt que de deviner un
         # échange non documenté pour ce cas.
-        raise ValueError(
+        _erreur = ValueError(
             f'SASL: échange multi-étapes inattendu pour {chosen_mechanism} '
             '(seuls PLAIN/ANONYMOUS en une étape sont pris en charge ici)'
         )
+        logger.debug('_sasl_negotiate() lève | {!r}', _erreur)
+        raise _erreur
+    logger.debug('_sasl_negotiate() terminée')
 
 
 # VeNCrypt (security type 19) sub-types, per the only formal spec that was
@@ -582,6 +630,11 @@ async def _start_tls_client(
     ssl_context for those sub-types with check_hostname enabled instead,
     forwarding it here is the correct behaviour too, not just a no-op.
     """
+    logger.debug(
+        '_start_tls_client() appelée | tls={} server_hostname={}',
+        ssl_context is not None,
+        server_hostname,
+    )
     loop = get_running_loop()
     transport = writer.transport
     protocol = transport.get_protocol()
@@ -589,6 +642,7 @@ async def _start_tls_client(
         transport, protocol, ssl_context, server_side=False, server_hostname=server_hostname
     )
     new_writer = StreamWriter(new_transport, protocol, reader, loop)
+    logger.debug('_start_tls_client() retourne | (reader, new_writer)')
     return reader, new_writer
 
 
@@ -661,20 +715,31 @@ async def _vencrypt_negotiate(
     a real `rfb::AuthFailureException` from the server, surfaced here as
     the existing SecurityResult failure-reason path (unchanged code).
     """
+    logger.debug(
+        '_vencrypt_negotiate() appelée | tls={} server_hostname={}',
+        ssl_context is not None,
+        server_hostname,
+    )
     server_major = await read_int(reader, 1)
     server_minor = await read_int(reader, 1)
     if server_major != 0 or server_minor < 2:
-        raise ValueError(
+        _erreur = ValueError(
             f'unsupported VeNCrypt version offered by server: {server_major}.{server_minor}'
         )
+        logger.debug('_vencrypt_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     writer.write(bytes([0, 2]))
     if await read_int(reader, 1) != 0:
-        raise ValueError('server rejected VeNCrypt version 0.2')
+        _erreur = ValueError('server rejected VeNCrypt version 0.2')
+        logger.debug('_vencrypt_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     n_subtypes = await read_int(reader, 1)
     if n_subtypes == 0:
-        raise ValueError('server advertised no VeNCrypt sub-types')
+        _erreur = ValueError('server advertised no VeNCrypt sub-types')
+        logger.debug('_vencrypt_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     raw_subtypes = await reader.readexactly(4 * n_subtypes)
     subtypes = [
         int.from_bytes(raw_subtypes[i : i + 4], 'big') for i in range(0, len(raw_subtypes), 4)
@@ -694,11 +759,13 @@ async def _vencrypt_negotiate(
             chosen = candidate
             break
     else:
-        raise ValueError(
+        _erreur = ValueError(
             f'unsupported VeNCrypt sub-types offered by server: {subtypes} (only '
             f'TLSNone/TLSVnc/TLSPlain/TLSSASL/X509None/X509Vnc/X509Plain/X509SASL '
             f'are implemented)'
         )
+        logger.debug('_vencrypt_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     writer.write(chosen.to_bytes(4, 'big'))
 
@@ -717,7 +784,11 @@ async def _vencrypt_negotiate(
     # vrai serveur (lu comme les 3 premiers octets de la poignée de main
     # TLS elle-même).
     if await read_int(reader, 1) == 0:
-        raise ValueError('server failed to set up VeNCrypt TLS (TLS session initialisation failed)')
+        _erreur = ValueError(
+            'server failed to set up VeNCrypt TLS (TLS session initialisation failed)'
+        )
+        logger.debug('_vencrypt_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     if ssl_context is None:
         if chosen in (
@@ -827,6 +898,7 @@ async def _vencrypt_negotiate(
             ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
 
     reader, writer = await _start_tls_client(reader, writer, ssl_context, server_hostname)
+    logger.debug('_vencrypt_negotiate() retourne | (reader, writer, chosen={})', chosen)
     return reader, writer, chosen
 
 
@@ -868,9 +940,14 @@ def _omac(key: bytes, tweak: int, message: bytes) -> bytes:
     OMAC_K^tweak(message) in the notation rfbproto.rst itself uses ("N =
     OMAC_K^0(Nonce)", etc.). *key* is the raw AES key (16 or 32 bytes).
     """
+    logger.trace(
+        '_omac() appelée | len(key)={} tweak={} len(message)={}', len(key), tweak, len(message)
+    )
     mac = cmac.CMAC(algorithms.AES(key))
     mac.update(bytes(15) + bytes([tweak]) + message)
-    return mac.finalize()
+    _resultat = mac.finalize()
+    logger.trace('_omac() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 def _eax_seal(key: bytes, nonce: bytes, header: bytes, plaintext: bytes) -> tuple[bytes, bytes]:
@@ -885,12 +962,22 @@ def _eax_seal(key: bytes, nonce: bytes, header: bytes, plaintext: bytes) -> tupl
     common/rdr/AESOutStream.cxx does it (via Nettle's EAX macros) --
     N=OMAC^0(nonce), H=OMAC^1(header), C=CTR_N(plaintext), tag=N⊕H⊕OMAC^2(C).
     """
+    logger.trace(
+        '_eax_seal() appelée | len(key)={} len(nonce)={} len(header)={} len(plaintext)={}',
+        len(key),
+        len(nonce),
+        len(header),
+        len(plaintext),
+    )
     n_tag = _omac(key, 0, nonce)
     h_tag = _omac(key, 1, header)
     encryptor = Cipher(algorithms.AES(key), modes.CTR(n_tag)).encryptor()
     ciphertext = encryptor.update(plaintext) + encryptor.finalize()
     c_tag = _omac(key, 2, ciphertext)
     tag = bytes(a ^ b ^ c for a, b, c in zip(n_tag, h_tag, c_tag))
+    logger.trace(
+        '_eax_seal() retourne | (len(ciphertext)={}, len(tag)={})', len(ciphertext), len(tag)
+    )
     return ciphertext, tag
 
 
@@ -903,16 +990,28 @@ def _eax_open(key: bytes, nonce: bytes, header: bytes, ciphertext: bytes, tag: b
     raises ValueError on mismatch, otherwise returns the decrypted
     plaintext.
     """
+    logger.trace(
+        '_eax_open() appelée | len(key)={} len(nonce)={} len(header)={} len(ciphertext)={} len(tag)={}',
+        len(key),
+        len(nonce),
+        len(header),
+        len(ciphertext),
+        len(tag),
+    )
     n_tag = _omac(key, 0, nonce)
     h_tag = _omac(key, 1, header)
     c_tag = _omac(key, 2, ciphertext)
     expected_tag = bytes(a ^ b ^ c for a, b, c in zip(n_tag, h_tag, c_tag))
     if not hmac.compare_digest(expected_tag, tag):
-        raise ValueError(
+        _erreur = ValueError(
             "AES-EAX : jeton d'authenticité invalide (message corrompu ou mauvaise clé)"
         )
+        logger.debug('_eax_open() lève | {!r}', _erreur)
+        raise _erreur
     decryptor = Cipher(algorithms.AES(key), modes.CTR(n_tag)).decryptor()
-    return decryptor.update(ciphertext) + decryptor.finalize()
+    _resultat = decryptor.update(ciphertext) + decryptor.finalize()
+    logger.trace('_eax_open() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 def _eax_increment_counter(counter: bytearray) -> None:
@@ -925,10 +1024,12 @@ def _eax_increment_counter(counter: bytearray) -> None:
     carrying into the next byte on overflow, stopping at the first byte
     that does *not* wrap to 0).
     """
+    logger.trace('_eax_increment_counter() appelée | len(counter)={}', len(counter))
     for i in range(16):
         counter[i] = (counter[i] + 1) & 0xFF
         if counter[i] != 0:
             break
+    logger.trace('_eax_increment_counter() terminée')
 
 
 class _EAXReader:
@@ -946,24 +1047,30 @@ class _EAXReader:
     """
 
     def __init__(self, raw_reader: StreamReader, key: bytes):
+        logger.debug('_EAXReader.__init__() appelée | len(key)={}', len(key))
         self._raw = raw_reader
         self._key = key
         self._counter = bytearray(16)
         self._buffer = b''
+        logger.debug('_EAXReader.__init__() terminée')
 
     async def readexactly(self, n: int) -> bytes:
+        logger.trace('_EAXReader.readexactly() appelée | n={}', n)
         while len(self._buffer) < n:
             self._buffer += await self._read_one_message()
         result, self._buffer = self._buffer[:n], self._buffer[n:]
+        logger.trace('_EAXReader.readexactly() retourne | {} octet(s)', len(result))
         return result
 
     async def _read_one_message(self) -> bytes:
+        logger.trace('_EAXReader._read_one_message() appelée')
         header = await self._raw.readexactly(2)
         length = int.from_bytes(header, 'big')
         ciphertext_and_tag = await self._raw.readexactly(length + _EAX_TAG_SIZE)
         ciphertext, tag = ciphertext_and_tag[:length], ciphertext_and_tag[length:]
         plaintext = _eax_open(self._key, bytes(self._counter), header, ciphertext, tag)
         _eax_increment_counter(self._counter)
+        logger.trace('_EAXReader._read_one_message() retourne | {} octet(s)', len(plaintext))
         return plaintext
 
 
@@ -979,11 +1086,14 @@ class _EAXWriter:
     """
 
     def __init__(self, raw_writer: StreamWriter, key: bytes):
+        logger.debug('_EAXWriter.__init__() appelée | len(key)={}', len(key))
         self._raw = raw_writer
         self._key = key
         self._counter = bytearray(16)
+        logger.debug('_EAXWriter.__init__() terminée')
 
     def write(self, data: bytes) -> None:
+        logger.trace('_EAXWriter.write() appelée | len(data)={}', len(data))
         data = bytes(data)
         for offset in range(0, len(data), _EAX_MAX_MESSAGE_SIZE):
             chunk = data[offset : offset + _EAX_MAX_MESSAGE_SIZE]
@@ -991,15 +1101,22 @@ class _EAXWriter:
             ciphertext, tag = _eax_seal(self._key, bytes(self._counter), header, chunk)
             self._raw.write(header + ciphertext + tag)
             _eax_increment_counter(self._counter)
+        logger.trace('_EAXWriter.write() terminée')
 
     async def drain(self) -> None:
+        logger.trace('_EAXWriter.drain() appelée')
         await self._raw.drain()
+        logger.trace('_EAXWriter.drain() terminée')
 
     def close(self) -> None:
+        logger.debug('_EAXWriter.close() appelée')
         self._raw.close()
+        logger.debug('_EAXWriter.close() terminée')
 
     async def wait_closed(self) -> None:
+        logger.debug('_EAXWriter.wait_closed() appelée')
         await self._raw.wait_closed()
+        logger.debug('_EAXWriter.wait_closed() terminée')
 
 
 async def _rsa_aes_negotiate(
@@ -1057,13 +1174,23 @@ async def _rsa_aes_negotiate(
     day, since TigerVNC's `SSecurityRSAAES` also delegates password
     verification to `PlainUsers`/PAM).
     """
+    logger.debug(
+        '_rsa_aes_negotiate() appelée | key_bits={} identifiant={} mot_de_passe={}',
+        key_bits,
+        bool(username),
+        bool(password),
+    )
     hash_algorithm = sha1 if key_bits == 128 else sha256
 
     server_key_length = await read_int(reader, 4)
     if server_key_length < RSA_AES_MIN_KEY_LENGTH:
-        raise ValueError(f'server RSA-AES key too short ({server_key_length} bits)')
+        _erreur = ValueError(f'server RSA-AES key too short ({server_key_length} bits)')
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     if server_key_length > RSA_AES_MAX_KEY_LENGTH:
-        raise ValueError(f'server RSA-AES key too long ({server_key_length} bits)')
+        _erreur = ValueError(f'server RSA-AES key too long ({server_key_length} bits)')
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     server_key_size = (server_key_length + 7) // 8
     server_key_n_bytes = await reader.readexactly(server_key_size)
     server_key_e_bytes = await reader.readexactly(server_key_size)
@@ -1100,14 +1227,20 @@ async def _rsa_aes_negotiate(
 
     encrypted_random_length = await read_int(reader, 2)
     if encrypted_random_length != client_key_size:
-        raise ValueError(
+        _erreur = ValueError(
             f'server sent a {encrypted_random_length}-byte encrypted random number, '
             f'expected {client_key_size} to match our own key size'
         )
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     encrypted_server_random = await reader.readexactly(encrypted_random_length)
     server_random = client_private_key.decrypt(encrypted_server_random, padding.PKCS1v15())
     if len(server_random) != random_size:
-        raise ValueError('failed to decrypt the server random number (wrong size after decryption)')
+        _erreur = ValueError(
+            'failed to decrypt the server random number (wrong size after decryption)'
+        )
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     # Clé de session = condensé complet pour 256 bits (SHA-256 fait déjà
     # 32 octets = 256 bits, aucune troncature) ; pour 128 bits, les 16
@@ -1132,35 +1265,51 @@ async def _rsa_aes_negotiate(
     expected_server_hash = hash_algorithm(server_key_blob + client_key_blob).digest()
     received_server_hash = await eax_reader.readexactly(len(expected_server_hash))
     if not hmac.compare_digest(received_server_hash, expected_server_hash):
-        raise ValueError(
+        _erreur = ValueError(
             'RSA-AES : hachage du serveur incorrect (négociation corrompue ou usurpée)'
         )
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     subtype = (await eax_reader.readexactly(1))[0]
     if subtype not in (RSA_AES_SUBTYPE_USERPASS, RSA_AES_SUBTYPE_PASS):
-        raise ValueError(f'unknown RSA-AES subtype {subtype!r} requested by server')
+        _erreur = ValueError(f'unknown RSA-AES subtype {subtype!r} requested by server')
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     if password is None or (subtype == RSA_AES_SUBTYPE_USERPASS and username is None):
-        raise ValueError(
+        _erreur = ValueError(
             'server requires username and password (RSA-AES)'
             if subtype == RSA_AES_SUBTYPE_USERPASS
             else 'server requires a password (RSA-AES)'
         )
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
 
     credentials = b''
     if subtype == RSA_AES_SUBTYPE_USERPASS:
         username_bytes = username.encode('utf-8')
         if len(username_bytes) > 255:
-            raise ValueError('username is too long for RSA-AES (255 bytes max once UTF-8 encoded)')
+            _erreur = ValueError(
+                'username is too long for RSA-AES (255 bytes max once UTF-8 encoded)'
+            )
+            logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+            raise _erreur
         credentials += bytes([len(username_bytes)]) + username_bytes
     else:
         credentials += b'\x00'
     password_bytes = password.encode('utf-8')
     if len(password_bytes) > 255:
-        raise ValueError('password is too long for RSA-AES (255 bytes max once UTF-8 encoded)')
+        _erreur = ValueError('password is too long for RSA-AES (255 bytes max once UTF-8 encoded)')
+        logger.debug('_rsa_aes_negotiate() lève | {!r}', _erreur)
+        raise _erreur
     credentials += bytes([len(password_bytes)]) + password_bytes
     eax_writer.write(credentials)
     await eax_writer.drain()
 
+    logger.debug(
+        '_rsa_aes_negotiate() retourne | (eax_reader, eax_writer, len(server_key_fingerprint)={})',
+        len(server_key_fingerprint),
+    )
     return eax_reader, eax_writer, server_key_fingerprint
 
 
@@ -1184,8 +1333,10 @@ class Clipboard:
         Client rather than here; this method's behaviour is unchanged.
         """
 
+        logger.trace('Clipboard.write() appelée | len(text)={}', len(text))
         data = text.encode('latin-1')
         self.writer.write(b'\x06\x00\x00\x00' + len(data).to_bytes(4, 'big') + data)
+        logger.trace('Clipboard.write() terminée')
 
 
 @dataclass
@@ -1198,12 +1349,15 @@ class Keyboard:
 
     @contextmanager
     def _write(self, key: str):
+        # Rien sur la touche (ni nom ni longueur) : enregistreur de frappes sinon.
+        logger.trace('Keyboard._write() appelée')
         data = key_codes[key].to_bytes(4, 'big')
         self.writer.write(b'\x04\x01\x00\x00' + data)
         try:
             yield
         finally:
             self.writer.write(b'\x04\x00\x00\x00' + data)
+        logger.trace('Keyboard._write() terminée')
 
     @contextmanager
     def hold(self, *keys: str):
@@ -1211,27 +1365,33 @@ class Keyboard:
         Context manager that pushes the given keys on enter, and releases them (in reverse order) on exit.
         """
 
+        logger.trace('Keyboard.hold() appelée | len(keys)={}', len(keys))
         with ExitStack() as stack:
             for key in keys:
                 stack.enter_context(self._write(key))
             yield
+        logger.trace('Keyboard.hold() terminée')
 
     def press(self, *keys: str):
         """
         Pushes all the given keys, and then releases them in reverse order.
         """
 
+        logger.trace('Keyboard.press() appelée | len(keys)={}', len(keys))
         with self.hold(*keys):
             pass
+        logger.trace('Keyboard.press() terminée')
 
     def write(self, text: str):
         """
         Pushes and releases each of the given keys, one after the other.
         """
 
+        logger.trace('Keyboard.write() appelée | len(text)={}', len(text))
         for key in text:
             with self.hold(key):
                 pass
+        logger.trace('Keyboard.write() terminée')
 
 
 @dataclass
@@ -1246,12 +1406,14 @@ class Mouse:
     y: int = 0
 
     def _write(self):
+        logger.trace('Mouse._write() appelée')
         self.writer.write(
             b'\x05'
             + self.buttons.to_bytes(1, 'big')
             + self.x.to_bytes(2, 'big')
             + self.y.to_bytes(2, 'big')
         )
+        logger.trace('Mouse._write() terminée')
 
     @contextmanager
     def hold(self, button: int = 0):
@@ -1259,6 +1421,7 @@ class Mouse:
         Context manager that presses a mouse button on enter, and releases it on exit.
         """
 
+        logger.trace('Mouse.hold() appelée | button={}', button)
         mask = 1 << button
         self.buttons |= mask
         self._write()
@@ -1267,53 +1430,66 @@ class Mouse:
         finally:
             self.buttons &= ~mask
             self._write()
+        logger.trace('Mouse.hold() terminée')
 
     def click(self, button: int = 0):
         """
         Presses and releases a mouse button.
         """
 
+        logger.trace('Mouse.click() appelée | button={}', button)
         with self.hold(button):
             pass
+        logger.trace('Mouse.click() terminée')
 
     def middle_click(self):
         """
         Presses and releases the middle mouse button.
         """
 
+        logger.trace('Mouse.middle_click() appelée')
         self.click(1)
+        logger.trace('Mouse.middle_click() terminée')
 
     def right_click(self):
         """
         Presses and releases the right mouse button.
         """
 
+        logger.trace('Mouse.right_click() appelée')
         self.click(2)
+        logger.trace('Mouse.right_click() terminée')
 
     def scroll_up(self, repeat=1):
         """
         Scrolls the mouse wheel upwards.
         """
 
+        logger.trace('Mouse.scroll_up() appelée | repeat={}', repeat)
         for _ in range(repeat):
             self.click(3)
+        logger.trace('Mouse.scroll_up() terminée')
 
     def scroll_down(self, repeat=1):
         """
         Scrolls the mouse wheel downwards.
         """
 
+        logger.trace('Mouse.scroll_down() appelée | repeat={}', repeat)
         for _ in range(repeat):
             self.click(4)
+        logger.trace('Mouse.scroll_down() terminée')
 
     def move(self, x: int, y: int):
         """
         Moves the mouse cursor to the given co-ordinates.
         """
 
+        logger.trace('Mouse.move() appelée | x={} y={}', x, y)
         self.x = x
         self.y = y
         self._write()
+        logger.trace('Mouse.move() terminée')
 
 
 @dataclass
@@ -1356,6 +1532,7 @@ class Screen:
         or its reciprocal, whichever is smaller.
         """
 
+        logger.trace('Screen.score() appelée')
         value = float(self.width * self.height)
         ratios = {
             Fraction(self.width, self.height).limit_denominator(64),
@@ -1363,6 +1540,7 @@ class Screen:
         }
         if not ratios & screen_ratios:
             value *= min(ratios) * 0.5
+        logger.trace('Screen.score() retourne | {}', value)
         return value
 
 
@@ -1408,19 +1586,27 @@ class StreamZReader:
         When n is provided, data will be returned as soon as it is available.
         """
 
+        logger.trace('StreamZReader.read() appelée | n={}', n)
         if n == -1:
             try:
                 self._zbuffer += await self.reader.readexactly(self.length)
             except IncompleteReadError as e:
+                logger.trace(
+                    'StreamZReader.read() lecture partielle | {} octet(s) sur {} attendus',
+                    len(e.partial),
+                    e.expected,
+                )
                 self._zbuffer += e.partial
             self.length = 0
             rdata = self._buffer[self._head :] + self.decompress.decompress(self._zbuffer)
             self._buffer = b''
             self._head = 0
             self._zbuffer = self.decompress.unconsumed_tail
+            logger.trace('StreamZReader.read() retourne | {} octet(s)', len(rdata))
             return rdata
 
         if (n <= 0) or ((len(self._buffer) <= self._head) and (self.length <= 0)):
+            logger.trace("StreamZReader.read() retourne | b''")
             return b''
 
         while (len(self._buffer) == self._head) and (self.length > 0):
@@ -1432,6 +1618,7 @@ class StreamZReader:
             self._zbuffer = self.decompress.unconsumed_tail
         rdata = self._buffer[self._head : self._head + n]
         self._head += len(rdata)
+        logger.trace('StreamZReader.read() retourne | {} octet(s)', len(rdata))
         return rdata
 
     async def readexactly(self, n: int) -> bytes:
@@ -1439,29 +1626,37 @@ class StreamZReader:
         Read exactly n bytes.
         Raise an asyncio.IncompleteReadError if the end of the stream is reached before n can be read.
         """
+        logger.trace('StreamZReader.readexactly() appelée | n={}', n)
         data = b''
         _n = n
         while _n > 0:
             ndata = await self.read(_n)
             if len(ndata) == 0:
-                raise IncompleteReadError(data, n)
+                _erreur = IncompleteReadError(data, n)
+                logger.debug('StreamZReader.readexactly() lève | {!r}', _erreur)
+                raise _erreur
             data += ndata
             _n = n - len(data)
+        logger.trace('StreamZReader.readexactly() retourne | {} octet(s)', len(data))
         return data
 
 
 def _tile_1d_gen(tw: int, x: int, w: int):
+    logger.trace('_tile_1d_gen() appelée | tw={} x={} w={}', tw, x, w)
     for cx in range(x, x + w - tw + 1, tw):
         yield (cx, tw)
     mod = w % tw
     if mod:
         yield (x + w - mod, mod)
+    logger.trace('_tile_1d_gen() terminée')
 
 
 def _tile_gen(tw: int, th: int, x: int, y: int, w: int, h: int):
+    logger.trace('_tile_gen() appelée | tw={} th={} x={} y={} w={} h={}', tw, th, x, y, w, h)
     for cy, ch in _tile_1d_gen(th, y, h):
         for cx, cw in _tile_1d_gen(tw, x, w):
             yield (cx, cy, cw, ch)
+    logger.trace('_tile_gen() terminée')
 
 
 def _lzo1x_decompress(src: bytes, out_len: int) -> bytes:
@@ -1479,46 +1674,66 @@ def _lzo1x_decompress(src: bytes, out_len: int) -> bytes:
     Vérifié contre `python-lzo` (liblzo2) et contre un vrai x11vnc, voir
     test_asyncvnc2.TestLzo1x et test_live_x11vnc.
     """
+    logger.trace('_lzo1x_decompress() appelée | len(src)={} out_len={}', len(src), out_len)
     _check_alloc_size(out_len, 'Ultra (LZO)')
     out = bytearray()
     ip = 0
     n = len(src)
 
     def byte() -> int:
+        logger.trace('_lzo1x_decompress.byte() appelée')
         nonlocal ip
         if ip >= n:
-            raise ValueError('LZO : flux tronqué')
+            _erreur = ValueError('LZO : flux tronqué')
+            logger.debug('_lzo1x_decompress.byte() lève | {!r}', _erreur)
+            raise _erreur
         v = src[ip]
         ip += 1
+        logger.trace('_lzo1x_decompress.byte() retourne | {}', v)
         return v
 
     def literals(count: int) -> None:
+        logger.trace('_lzo1x_decompress.literals() appelée | count={}', count)
         nonlocal ip
         if ip + count > n:
-            raise ValueError('LZO : littéraux hors du flux')
+            _erreur = ValueError('LZO : littéraux hors du flux')
+            logger.debug('_lzo1x_decompress.literals() lève | {!r}', _erreur)
+            raise _erreur
         if len(out) + count > out_len:
-            raise ValueError('LZO : sortie plus longue que le rectangle')
+            _erreur = ValueError('LZO : sortie plus longue que le rectangle')
+            logger.debug('_lzo1x_decompress.literals() lève | {!r}', _erreur)
+            raise _erreur
         out.extend(src[ip : ip + count])
         ip += count
+        logger.trace('_lzo1x_decompress.literals() terminée')
 
     def zero_run() -> int:
         # Octets nuls successifs : chacun vaut 255, l'octet non nul suivant s'ajoute.
+        logger.trace('_lzo1x_decompress.zero_run() appelée')
         zeros = 0
         while byte() == 0:
             zeros += 1
-        return zeros * 255 + src[ip - 1]
+        _resultat = zeros * 255 + src[ip - 1]
+        logger.trace('_lzo1x_decompress.zero_run() retourne | {}', _resultat)
+        return _resultat
 
     def copy_match(dist: int, count: int) -> None:
+        logger.trace('_lzo1x_decompress.copy_match() appelée | dist={} count={}', dist, count)
         start = len(out) - dist
         if start < 0:
-            raise ValueError('LZO : référence avant le début de la sortie')
+            _erreur = ValueError('LZO : référence avant le début de la sortie')
+            logger.debug('_lzo1x_decompress.copy_match() lève | {!r}', _erreur)
+            raise _erreur
         if len(out) + count > out_len:
-            raise ValueError('LZO : sortie plus longue que le rectangle')
+            _erreur = ValueError('LZO : sortie plus longue que le rectangle')
+            logger.debug('_lzo1x_decompress.copy_match() lève | {!r}', _erreur)
+            raise _erreur
         if dist >= count:
             out.extend(out[start : start + count])
         else:  # recouvrement : copie octet par octet (répétition)
             for i in range(count):
                 out.append(out[start + i])
+        logger.trace('_lzo1x_decompress.copy_match() terminée')
 
     state = 0
     t = byte() if n else 0
@@ -1566,7 +1781,9 @@ def _lzo1x_decompress(src: bytes, out_len: int) -> bytes:
             dist = high + (word >> 2)
             if dist == 0:  # marqueur de fin (M4 de distance nulle)
                 if count != 1:
-                    raise ValueError('LZO : marqueur de fin invalide')
+                    _erreur = ValueError('LZO : marqueur de fin invalide')
+                    logger.debug('_lzo1x_decompress() lève | {!r}', _erreur)
+                    raise _erreur
                 break
             copy_match(dist + 0x4000, count + 2)
             nxt = word & 3
@@ -1574,8 +1791,12 @@ def _lzo1x_decompress(src: bytes, out_len: int) -> bytes:
         if nxt:
             literals(nxt)
     if len(out) != out_len:
-        raise ValueError(f'LZO : {len(out)} octets décompressés, {out_len} attendus')
-    return bytes(out)
+        _erreur = ValueError(f'LZO : {len(out)} octets décompressés, {out_len} attendus')
+        logger.debug('_lzo1x_decompress() lève | {!r}', _erreur)
+        raise _erreur
+    _resultat = bytes(out)
+    logger.trace('_lzo1x_decompress() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 class _BytesReader:
@@ -1586,14 +1807,20 @@ class _BytesReader:
     """
 
     def __init__(self, data: bytes):
+        logger.trace('_BytesReader.__init__() appelée | len(data)={}', len(data))
         self._data = data
         self._pos = 0
+        logger.trace('_BytesReader.__init__() terminée')
 
     async def readexactly(self, n: int) -> bytes:
+        logger.trace('_BytesReader.readexactly() appelée | n={}', n)
         chunk = self._data[self._pos : self._pos + n]
         if len(chunk) < n:
-            raise IncompleteReadError(chunk, n)
+            _erreur = IncompleteReadError(chunk, n)
+            logger.debug('_BytesReader.readexactly() lève | {!r}', _erreur)
+            raise _erreur
         self._pos += n
+        logger.trace('_BytesReader.readexactly() retourne | {} octet(s)', len(chunk))
         return chunk
 
 
@@ -1608,10 +1835,17 @@ async def _hextile_tile_body(reader, mask: int, bg, fg: bytes, cw: int, ch: int)
     in-memory buffer via _BytesReader) -- both follow identical Hextile rules
     once the subencoding byte and a byte source are in hand.
     """
+    logger.trace(
+        '_hextile_tile_body() appelée | mask={} bg={} fg={} cw={} ch={}', mask, bg, fg, cw, ch
+    )
     if mask & 2:
         bg = await reader.readexactly(4)
     if bg is None:
-        raise ValueError('Hextile: first tile of the rectangle did not specify a background colour')
+        _erreur = ValueError(
+            'Hextile: first tile of the rectangle did not specify a background colour'
+        )
+        logger.debug('_hextile_tile_body() lève | {!r}', _erreur)
+        raise _erreur
     if mask & 4:
         fg = await reader.readexactly(4)
 
@@ -1628,29 +1862,46 @@ async def _hextile_tile_body(reader, mask: int, bg, fg: bytes, cw: int, ch: int)
             sw = ((size >> 4) & 0x0F) + 1
             sh = (size & 0x0F) + 1
             tile[sy : sy + sh, sx : sx + sw, :] = np.ndarray((sh, sw, 4), 'B', colour * (sw * sh))
+    logger.trace('_hextile_tile_body() retourne | (len(tile)={}, bg={}, fg={})', len(tile), bg, fg)
     return tile, bg, fg
 
 
 async def _rle_len(reader: StreamReader):
+    logger.trace('_rle_len() appelée')
     _pixels = 0
     while True:
         n = await read_int(reader, 1)
         _pixels += n
         if n != 255:
             break
-    return _pixels + 1
+    _resultat = _pixels + 1
+    logger.trace('_rle_len() retourne | {}', _resultat)
+    return _resultat
 
 
 async def _update_palette(reader: StreamReader, n: int, palette: list | None = None):
+    logger.trace(
+        '_update_palette() appelée | n={} len(palette)={}',
+        n,
+        None if palette is None else len(palette),
+    )
     pal_bytes = await reader.readexactly(3 * n)
     pal_list = [pal_bytes[i : i + 3] for i in range(0, 3 * n, 3)]
     palette.clear()
     palette.extend(pal_list)
+    logger.trace('_update_palette() terminée')
 
 
 async def _rle_packedbits(
     reader: StreamReader, cw: int, ch: int, subencoding: int, palette: list
 ) -> bytes:
+    logger.trace(
+        '_rle_packedbits() appelée | cw={} ch={} subencoding={} len(palette)={}',
+        cw,
+        ch,
+        subencoding,
+        len(palette),
+    )
     frame = b''
     if subencoding <= 16:
         # subencoding == 2 .. 16
@@ -1678,12 +1929,20 @@ async def _rle_packedbits(
                 packcol = next(rowit)
             offset -= bits
             frame += palette[(packcol >> offset) & mask]
+    logger.trace('_rle_packedbits() retourne | {} octet(s)', len(frame))
     return frame
 
 
 async def _rle_rle(
     reader: StreamReader, cw: int, ch: int, subencoding: int, palette: list
 ) -> bytes:
+    logger.trace(
+        '_rle_rle() appelée | cw={} ch={} subencoding={} len(palette)={}',
+        cw,
+        ch,
+        subencoding,
+        len(palette),
+    )
     frame = b''
     subencoding -= 128
     if subencoding > 1:
@@ -1710,7 +1969,10 @@ async def _rle_rle(
         frame += color * p
         pixels += p
     if pixels > tile_pixels:
-        raise ValueError('Too many pixels')
+        _erreur = ValueError('Too many pixels')
+        logger.debug('_rle_rle() lève | {!r}', _erreur)
+        raise _erreur
+    logger.trace('_rle_rle() retourne | {} octet(s)', len(frame))
     return frame
 
 
@@ -1718,6 +1980,7 @@ async def _tight_read_length(reader: StreamReader) -> int:
     """
     Reads a Tight "compact" length (1-3 bytes) and returns it.
     """
+    logger.trace('_tight_read_length() appelée')
     b0 = await read_int(reader, 1)
     length = b0 & 0x7F
     if b0 & 0x80:
@@ -1726,6 +1989,7 @@ async def _tight_read_length(reader: StreamReader) -> int:
         if b1 & 0x80:
             b2 = await read_int(reader, 1)
             length |= b2 << 14
+    logger.trace('_tight_read_length() retourne | {}', length)
     return length
 
 
@@ -1733,6 +1997,13 @@ def _tight_palette_filter(data: bytes, cw: int, ch: int, palette: list) -> bytes
     """
     Expands Tight PaletteFilter indices back into TPIXEL (RGB) data.
     """
+    logger.trace(
+        '_tight_palette_filter() appelée | len(data)={} cw={} ch={} len(palette)={}',
+        len(data),
+        cw,
+        ch,
+        len(palette),
+    )
     n = len(palette)
     bits = 1 if n == 2 else 8
     rowlen = (bits * cw + 7) // 8
@@ -1752,13 +2023,16 @@ def _tight_palette_filter(data: bytes, cw: int, ch: int, palette: list) -> bytes
             for cx in range(cw):
                 out[base : base + 3] = palette[row[cx]]
                 base += 3
-    return bytes(out)
+    _resultat = bytes(out)
+    logger.trace('_tight_palette_filter() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 def _tight_gradient_filter(data: bytes, cw: int, ch: int) -> bytes:
     """
     Reverses the Tight GradientFilter prediction to recover raw TPIXEL data.
     """
+    logger.trace('_tight_gradient_filter() appelée | len(data)={} cw={} ch={}', len(data), cw, ch)
     out = bytearray(cw * ch * 3)
     prev_row = [(0, 0, 0)] * cw
     for cy in range(ch):
@@ -1782,7 +2056,9 @@ def _tight_gradient_filter(data: bytes, cw: int, ch: int) -> bytes:
             left = pixel
             base += 3
         prev_row = cur_row
-    return bytes(out)
+    _resultat = bytes(out)
+    logger.trace('_tight_gradient_filter() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 def _tight_decode_image(data: bytes, width: int, height: int) -> np.ndarray:
@@ -1793,18 +2069,24 @@ def _tight_decode_image(data: bytes, width: int, height: int) -> np.ndarray:
     Requires Pillow (an optional dependency, only needed if the server actually
     sends Jpeg/PngCompression sub-rectangles): pip install Pillow.
     """
+    logger.trace(
+        '_tight_decode_image() appelée | len(data)={} width={} height={}', len(data), width, height
+    )
     try:
         from PIL import Image
     except ImportError as exc:
-        raise RuntimeError(
+        _erreur = RuntimeError(
             'Decoding Tight/TightPng image sub-rectangles requires Pillow (pip install Pillow)'
-        ) from exc
+        )
+        logger.debug('_tight_decode_image() lève | {!r} (cause : {!r})', _erreur, exc)
+        raise _erreur from exc
     import io
 
     image = Image.open(io.BytesIO(data)).convert('RGB')
     array = np.asarray(image, dtype='B')
     if array.shape != (height, width, 3):
         array = array.reshape((height, width, 3))
+    logger.trace('_tight_decode_image() retourne | tableau {}', array.shape)
     return array
 
 
@@ -1917,6 +2199,14 @@ class Video:
         allow_indexed_colour: bool = False,
         shared: bool = True,
     ) -> Video:
+        logger.debug(
+            'Video.create() appelée | encodings={} jpeg_quality={} compression_level={} allow_indexed_colour={} shared={}',
+            encodings,
+            jpeg_quality,
+            compression_level,
+            allow_indexed_colour,
+            shared,
+        )
         encodings = EncList(encodings)
 
         writer.write(bytes([1 if shared else 0]))
@@ -1947,11 +2237,15 @@ class Video:
         values = [e.value for e in encodings]
         if jpeg_quality is not None:
             if not 0 <= jpeg_quality <= 9:
-                raise ValueError('jpeg_quality must be between 0 and 9')
+                _erreur = ValueError('jpeg_quality must be between 0 and 9')
+                logger.debug('Video.create() lève | {!r}', _erreur)
+                raise _erreur
             values.append(-32 + jpeg_quality)
         if compression_level is not None:
             if not 0 <= compression_level <= 9:
-                raise ValueError('compression_level must be between 0 and 9')
+                _erreur = ValueError('compression_level must be between 0 and 9')
+                logger.debug('Video.create() lève | {!r}', _erreur)
+                raise _erreur
             values.append(-256 + compression_level)
 
         writer.write(b'\x02\x00' + len(values).to_bytes(2, 'big'))
@@ -1959,7 +2253,9 @@ class Video:
 
         decompress = decompressobj()
 
-        return cls(reader, writer, decompress, name, width, height, mode, encodings)
+        _resultat = cls(reader, writer, decompress, name, width, height, mode, encodings)
+        logger.debug('Video.create() retourne | {}x{} mode={}', width, height, mode)
+        return _resultat
 
     def get_rect(
         self, x: int = 0, y: int = 0, width: int | None = None, height: int | None = None
@@ -1967,6 +2263,7 @@ class Video:
         """
         Crops the rectangle according to the video buffer.
         """
+        logger.trace('Video.get_rect() appelée | x={} y={} width={} height={}', x, y, width, height)
         if x < 0:
             x = 0
         elif x > self.width:
@@ -1984,6 +2281,9 @@ class Video:
         elif height < 0:
             height = 0
 
+        logger.trace(
+            'Video.get_rect() retourne | (x={}, y={}, width={}, height={})', x, y, width, height
+        )
         return (x, y, width, height)
 
     def refresh(self, x: int = 0, y: int = 0, width: int | None = None, height: int | None = None):
@@ -1991,6 +2291,7 @@ class Video:
         Sends a video buffer update request to the server.
         """
 
+        logger.trace('Video.refresh() appelée | x={} y={} width={} height={}', x, y, width, height)
         incremental = self.data is not None
 
         (x, y, width, height) = self.get_rect(x, y, width, height)
@@ -2003,6 +2304,7 @@ class Video:
             + width.to_bytes(2, 'big')
             + height.to_bytes(2, 'big')
         )
+        logger.trace('Video.refresh() terminée')
 
     def _update_rect(self, x1: int, x2: int, y1: int, y2: int, data: np.ndarray):
         """
@@ -2015,6 +2317,14 @@ class Video:
         """
 
         #        print(f"_update_rect {x1} +{x2-x1} {y1} +{y2-y1} {data.shape}")
+        logger.trace(
+            'Video._update_rect() appelée | x1={} x2={} y1={} y2={} len(data)={}',
+            x1,
+            x2,
+            y1,
+            y2,
+            len(data),
+        )
         if self.data is None:
             self.data = np.zeros((self.height, self.width, 4), 'B')
         # indexed8 has no channel-order letters like the truecolour modes ('rgba', 'bgra', ...) --
@@ -2030,8 +2340,12 @@ class Video:
                 self.data[y1:y2, x1:x2, 1:4] = data
         self.data[y1:y2, x1:x2, a_index] = 255
         self.serial = (self.serial + 1) & 0xFFFFFFF
+        logger.trace('Video._update_rect() terminée')
 
     async def process_raw(self, _reader, x, y, width, height):
+        logger.trace(
+            'Video.process_raw() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         ff = height * width * 4
         (cx, cy) = (x, y)
         data = b''
@@ -2048,6 +2362,7 @@ class Video:
                 cy += rows
                 data = data[rows * width * 4 :]
                 await sleep(0)
+        logger.trace('Video.process_raw() terminée')
 
     async def process_ultra(self, _reader, x, y, width, height):
         """
@@ -2056,15 +2371,20 @@ class Video:
         contexte partagé, contrairement à zlib). Mode indexé : 1 octet par
         pixel, décodé comme un Raw indexé.
         """
+        logger.trace(
+            'Video.process_ultra() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         length = await read_int(_reader, 4)
         _check_alloc_size(length, 'Ultra (LZO)')
         bpp = 1 if self.mode == 'indexed8' else 4
         data = _lzo1x_decompress(await _reader.readexactly(length), width * height * bpp)
         if bpp == 1:
             await self.process_raw_indexed(_BytesReader(data), x, y, width, height)
+            logger.trace('Video.process_ultra() retourne')
             return
         self._update_rect(x, x + width, y, y + height, np.ndarray((height, width, 4), 'B', data))
         await sleep(0)
+        logger.trace('Video.process_ultra() terminée')
 
     async def process_raw_indexed(self, _reader, x, y, width, height):
         """
@@ -2083,6 +2403,13 @@ class Video:
         (non-incremental) FramebufferUpdate after any SetColourMapEntries you
         receive, so the affected area gets redecoded with the palette now known.
         """
+        logger.trace(
+            'Video.process_raw_indexed() appelée | x={} y={} width={} height={}',
+            x,
+            y,
+            width,
+            height,
+        )
         indices = np.frombuffer(await _reader.readexactly(width * height), 'B').reshape(
             height, width
         )
@@ -2094,8 +2421,17 @@ class Video:
                 lut[idx] = (r, g, b, 255)
         self._update_rect(x, x + width, y, y + height, lut[indices])
         await sleep(0)
+        logger.trace('Video.process_raw_indexed() terminée')
 
     async def process_xrle(self, _reader, x, y, width, height, tile_sz):
+        logger.trace(
+            'Video.process_xrle() appelée | x={} y={} width={} height={} tile_sz={}',
+            x,
+            y,
+            width,
+            height,
+            tile_sz,
+        )
         palette = []
 
         for cx, cy, cw, ch in _tile_gen(tile_sz, tile_sz, x, y, width, height):
@@ -2121,30 +2457,40 @@ class Video:
                 # docs/sessions/session-11-2026-09-09.md pour le détail des essais et pourquoi ce
                 # n'est délibérément PAS deviné plus loin ici (le risque est de décoder du faux
                 # silencieusement). On refuse donc explicitement plutôt que de corrompre l'image.
-                raise ValueError(
+                _erreur = ValueError(
                     f'Palette subencoding {subencoding} (plage 17-126, réservée par la RFC) reçue '
                     '-- probablement du ZYWRLE réel (QEMU) dont le format de tuile exact pour '
                     "cette plage n'a pas été déterminé avec certitude dans ce fork ; voir "
                     'Enc.ZYWRLE et docs/features-backlog.md'
                 )
+                logger.debug('Video.process_xrle() lève | {!r}', _erreur)
+                raise _erreur
             else:
                 block = await _rle_rle(_reader, cw, ch, subencoding, palette)
                 self._update_rect(cx, cx + cw, cy, cy + ch, np.ndarray((ch, cw, 3), 'B', block))
             await sleep(0)
+        logger.trace('Video.process_xrle() terminée')
 
     async def process_copy(self, _reader, x, y, width, height):
+        logger.trace(
+            'Video.process_copy() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         srcx = await read_int(_reader, 2)
         srcy = await read_int(_reader, 2)
         #        print(f"Copy Rect {width}x{height} ({srcx},{srcy}) ==> ({x},{y})")
         self._update_rect(
             x, x + width, y, y + height, self.data[srcy : srcy + height, srcx : srcx + width, :]
         )
+        logger.trace('Video.process_copy() terminée')
 
     async def process_tight(self, _reader, x, y, width, height):
         """
         Decodes a Tight or TightPng-encoded rectangle (BasicCompression, FillCompression,
         JpegCompression or PngCompression).
         """
+        logger.trace(
+            'Video.process_tight() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         ctl = await read_int(_reader, 1)
         for i in range(4):
             if ctl & (1 << i):
@@ -2159,6 +2505,7 @@ class Video:
                 self._update_rect(
                     x, x + width, y, y + height, np.ndarray((height, width, 3), 'B', block)
                 )
+                logger.trace('Video.process_tight() retourne')
                 return
             if kind == 0x90:
                 length = await _tight_read_length(_reader)
@@ -2166,8 +2513,11 @@ class Video:
                 image_data = await _reader.readexactly(length)
                 block = _tight_decode_image(image_data, width, height)
                 self._update_rect(x, x + width, y, y + height, block)
+                logger.trace('Video.process_tight() retourne')
                 return
-            raise ValueError(f'Invalid Tight compression-control byte: {ctl:#x}')
+            _erreur = ValueError(f'Invalid Tight compression-control byte: {ctl:#x}')
+            logger.debug('Video.process_tight() lève | {!r}', _erreur)
+            raise _erreur
 
         stream_id = (ctl >> 4) & 0x03
         filter_id = (await read_int(_reader, 1)) if (ctl & 0x40) else 0
@@ -2182,7 +2532,9 @@ class Video:
         elif filter_id in (0, 2):
             data_size = width * height * 3
         else:
-            raise ValueError(f'Unknown Tight filter-id: {filter_id}')
+            _erreur = ValueError(f'Unknown Tight filter-id: {filter_id}')
+            logger.debug('Video.process_tight() lève | {!r}', _erreur)
+            raise _erreur
 
         if data_size < 12:
             raw = await _reader.readexactly(data_size)
@@ -2201,11 +2553,15 @@ class Video:
 
         self._update_rect(x, x + width, y, y + height, np.ndarray((height, width, 3), 'B', block))
         await sleep(0)
+        logger.trace('Video.process_tight() terminée')
 
     async def process_hextile(self, _reader, x, y, width, height):
         """
         Decodes a Hextile-encoded rectangle.
         """
+        logger.trace(
+            'Video.process_hextile() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         bg = None
         fg = bytes(4)
         for cx, cy, cw, ch in _tile_gen(16, 16, x, y, width, height):
@@ -2220,12 +2576,16 @@ class Video:
             tile, bg, fg = await _hextile_tile_body(_reader, mask, bg, fg, cw, ch)
             self._update_rect(cx, cx + cw, cy, cy + ch, tile)
             await sleep(0)
+        logger.trace('Video.process_hextile() terminée')
 
     async def process_rre(self, _reader, x, y, width, height):
         """
         Decodes an RRE-encoded rectangle: a background pixel plus N
         axis-aligned solid-colour subrectangles drawn on top.
         """
+        logger.trace(
+            'Video.process_rre() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         n = await read_int(_reader, 4)
         bg = await _reader.readexactly(4)
         tile = np.ndarray((height, width, 4), 'B', bg * (width * height)).copy()
@@ -2238,6 +2598,7 @@ class Video:
             tile[sy : sy + sh, sx : sx + sw, :] = np.ndarray((sh, sw, 4), 'B', colour * (sw * sh))
             await sleep(0)
         self._update_rect(x, x + width, y, y + height, tile)
+        logger.trace('Video.process_rre() terminée')
 
     async def process_corre(self, _reader, x, y, width, height):
         """
@@ -2248,11 +2609,16 @@ class Video:
         for CoRRE to be legal; enforced explicitly below rather than
         trusting the encoder.
         """
+        logger.trace(
+            'Video.process_corre() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         if width > 255 or height > 255:
-            raise ValueError(
+            _erreur = ValueError(
                 f'CoRRE: rectangle {width}x{height} exceeds the 255x255 limit '
                 f'implied by its 1-byte subrectangle fields'
             )
+            logger.debug('Video.process_corre() lève | {!r}', _erreur)
+            raise _erreur
         n = await read_int(_reader, 4)
         bg = await _reader.readexactly(4)
         tile = np.ndarray((height, width, 4), 'B', bg * (width * height)).copy()
@@ -2265,6 +2631,7 @@ class Video:
             tile[sy : sy + sh, sx : sx + sw, :] = np.ndarray((sh, sw, 4), 'B', colour * (sw * sh))
             await sleep(0)
         self._update_rect(x, x + width, y, y + height, tile)
+        logger.trace('Video.process_corre() terminée')
 
     async def process_zlibhex(self, _reader, x, y, width, height):
         """
@@ -2278,6 +2645,9 @@ class Video:
         Zlib tiles -- both persist for the life of the connection (no reset bits
         in this encoding, unlike Tight).
         """
+        logger.trace(
+            'Video.process_zlibhex() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         bg = None
         fg = bytes(4)
         for cx, cy, cw, ch in _tile_gen(16, 16, x, y, width, height):
@@ -2310,13 +2680,18 @@ class Video:
             tile, bg, fg = await _hextile_tile_body(_reader, mask, bg, fg, cw, ch)
             self._update_rect(cx, cx + cw, cy, cy + ch, tile)
             await sleep(0)
+        logger.trace('Video.process_zlibhex() terminée')
 
     async def process_cursor(self, x, y, width, height):
         """
         Decodes a Rich Cursor pseudo-encoding rectangle into self.cursor.
         """
+        logger.debug(
+            'Video.process_cursor() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         if width == 0 or height == 0:
             self.cursor = Cursor(x, y, width, height, np.zeros((0, 0, 4), 'B'))
+            logger.debug('Video.process_cursor() retourne')
             return
         _check_alloc_size(width * height * 4, 'Curseur (Rich Cursor)')
         pixel_bytes = await self.reader.readexactly(width * height * 4)
@@ -2337,6 +2712,7 @@ class Video:
         ]
         alpha = (mask_bits * 255).astype('B')
         self.cursor = Cursor(x, y, width, height, np.dstack((rgb, alpha)))
+        logger.debug('Video.process_cursor() terminée')
 
     async def process_x_cursor(self, x, y, width, height):
         """
@@ -2344,8 +2720,12 @@ class Video:
         simpler cousin of Rich Cursor: two RGB triplets instead of full
         pixel-format colours, plus a 1-bit-per-pixel bitmap selecting between them).
         """
+        logger.debug(
+            'Video.process_x_cursor() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         if width == 0 or height == 0:
             self.cursor = Cursor(x, y, width, height, np.zeros((0, 0, 4), 'B'))
+            logger.debug('Video.process_x_cursor() retourne')
             return
 
         _check_alloc_size(width * height * 4, 'Curseur (X Cursor)')
@@ -2365,6 +2745,7 @@ class Video:
         rgb = np.where(bitmap[:, :, None].astype(bool), fore, back).astype('B')
         alpha = (mask * 255).astype('B')
         self.cursor = Cursor(x, y, width, height, np.dstack((rgb, alpha)))
+        logger.debug('Video.process_x_cursor() terminée')
 
     async def process_cursor_with_alpha(self, x, y, width, height):
         """
@@ -2375,29 +2756,42 @@ class Video:
         RGBA regardless of the negotiated pixel format. Only the Raw
         sub-encoding (by far the common case in practice) is supported here.
         """
+        logger.debug(
+            'Video.process_cursor_with_alpha() appelée | x={} y={} width={} height={}',
+            x,
+            y,
+            width,
+            height,
+        )
         sub_encoding = await read_int(self.reader, 4)
         if width == 0 or height == 0:
             self.cursor = Cursor(x, y, width, height, np.zeros((0, 0, 4), 'B'))
+            logger.debug('Video.process_cursor_with_alpha() retourne')
             return
         if sub_encoding != 0:
-            raise ValueError(
+            _erreur = ValueError(
                 f'Cursor With Alpha: unsupported sub-encoding {sub_encoding} (only Raw is handled)'
             )
+            logger.debug('Video.process_cursor_with_alpha() lève | {!r}', _erreur)
+            raise _erreur
         _check_alloc_size(width * height * 4, 'Curseur (Cursor With Alpha)')
         pixel_bytes = await self.reader.readexactly(width * height * 4)
         await sleep(0)
         self.cursor = Cursor(
             x, y, width, height, np.ndarray((height, width, 4), 'B', pixel_bytes).copy()
         )
+        logger.debug('Video.process_cursor_with_alpha() terminée')
 
     async def process_desktop_size(self, width, height):
         """
         Handles the (simple) DesktopSize pseudo-encoding: resizes the video buffer.
         """
+        logger.debug('Video.process_desktop_size() appelée | width={} height={}', width, height)
         self.width = width
         self.height = height
         self.data = None
         await sleep(0)
+        logger.debug('Video.process_desktop_size() terminée')
 
     async def process_extended_desktop_size(self, x, y, width, height):
         """
@@ -2409,6 +2803,13 @@ class Video:
         client's SetDesktopSize, 2 = another client's request was approved)
         and y-position carries the status code (0 = success) when x is 1.
         """
+        logger.debug(
+            'Video.process_extended_desktop_size() appelée | x={} y={} width={} height={}',
+            x,
+            y,
+            width,
+            height,
+        )
         reason = x
         status = y
         count = await read_int(self.reader, 1)
@@ -2428,8 +2829,10 @@ class Video:
             self.data = None
         self.screens = screens
         await sleep(0)
+        logger.debug('Video.process_extended_desktop_size() terminée')
 
     async def read(self):
+        logger.trace('Video.read() appelée')
         x = await read_int(self.reader, 2)
         y = await read_int(self.reader, 2)
         width = await read_int(self.reader, 2)
@@ -2440,7 +2843,7 @@ class Video:
         ):  # read_int is unsigned; pseudo-encodings are negative S32 values
             raw_encoding -= 0x100000000
         if raw_encoding == _H264_ENCODING:
-            raise NotImplementedError(
+            _erreur = NotImplementedError(
                 'Received an Open H.264 rectangle (encoding 0x48323634). This encoding is '
                 'intentionally not decoded here: it comes from an experimental, unmerged '
                 'TigerVNC extension (PR #1194) with no stable, canonical wire-format spec -- '
@@ -2453,6 +2856,8 @@ class Video:
                 'in use (it is not guaranteed to be identical across TigerVNC/TurboVNC forks) '
                 'before implementing a decoder.'
             )
+            logger.debug('Video.read() lève | {!r}', _erreur)
+            raise _erreur
         encoding = Enc(raw_encoding)
         length = height * width * 4
         #        print(f"GET VIDEO REC: {x} {y} {width}x{height} / {encoding}")
@@ -2521,11 +2926,15 @@ class Video:
             await self.process_extended_desktop_size(x, y, width, height)
 
         elif encoding is Enc.LAST_RECT:
+            logger.trace('Video.read() retourne | True')
             return True  # signals Client.read() to stop looping over rectangles
 
         else:
-            raise ValueError(encoding)
+            _erreur = ValueError(encoding)
+            logger.debug('Video.read() lève | {!r}', _erreur)
+            raise _erreur
 
+        logger.trace('Video.read() retourne | False')
         return False
 
     def as_rgba(
@@ -2535,15 +2944,22 @@ class Video:
         Returns the video buffer or the selected part of it as a 3D RGBA array.
         """
 
+        logger.trace('Video.as_rgba() appelée | x={} y={} width={} height={}', x, y, width, height)
         (x, y, width, height) = self.get_rect(x, y, width, height)
 
         if self.data is None:
-            return np.zeros((height, width, 4), 'B')
+            _resultat = np.zeros((height, width, 4), 'B')
+            logger.trace('Video.as_rgba() retourne | tableau {}', _resultat.shape)
+            return _resultat
         if self.mode == 'rgba':
-            return self.data[y : y + height, x : x + width, :]
+            _resultat = self.data[y : y + height, x : x + width, :]
+            logger.trace('Video.as_rgba() retourne | tableau {}', _resultat.shape)
+            return _resultat
         if self.mode == 'abgr':
-            return self.data[y : y + height, x : x + width, ::-1]
-        return np.dstack(
+            _resultat = self.data[y : y + height, x : x + width, ::-1]
+            logger.trace('Video.as_rgba() retourne | tableau {}', _resultat.shape)
+            return _resultat
+        _resultat = np.dstack(
             (
                 self.data[y : y + height, x : x + width, self.mode.index('r')],
                 self.data[y : y + height, x : x + width, self.mode.index('g')],
@@ -2551,6 +2967,8 @@ class Video:
                 self.data[y : y + height, x : x + width, self.mode.index('a')],
             )
         )
+        logger.trace('Video.as_rgba() retourne | tableau {}', _resultat.shape)
+        return _resultat
 
     def is_complete(
         self, x: int = 0, y: int = 0, width: int | None = None, height: int | None = None
@@ -2559,20 +2977,29 @@ class Video:
         Returns true if the video buffer or the selected part of it is entirely opaque.
         """
 
+        logger.trace(
+            'Video.is_complete() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         if self.data is None:
+            logger.trace('Video.is_complete() retourne | False')
             return False
 
         (x, y, width, height) = self.get_rect(x, y, width, height)
 
-        return self.data[y : y + height, x : x + width, self.mode.index('a')].all()
+        _resultat = self.data[y : y + height, x : x + width, self.mode.index('a')].all()
+        logger.trace('Video.is_complete() retourne | {}', bool(_resultat))
+        return _resultat
 
     def detect_screens(self) -> list[Screen]:
         """
         Detect physical screens by inspecting the alpha channel.
         """
 
+        logger.debug('Video.detect_screens() appelée')
         if self.data is None:
-            return []
+            _resultat = []
+            logger.debug('Video.detect_screens() retourne | {} élément(s)', len(_resultat))
+            return _resultat
 
         mask = self.data[:, :, self.mode.index('a')]
         mask = np.pad(mask // 255, ((1, 1), (1, 1))).astype(np.int8)
@@ -2622,7 +3049,9 @@ class Video:
 
             # Finish up if no screens remain
             else:
+                logger.debug('Video.detect_screens() retourne | {} octet(s)', len(screens))
                 return screens
+        logger.debug('Video.detect_screens() terminée')
 
 
 class UpdateType(Enum):
@@ -2758,14 +3187,31 @@ class Client:
         hostname to check (see `listen()`'s own docstring).
         """
 
+        logger.debug(
+            'Client.create() appelée | identifiant={} mot_de_passe={} cle_hote={} encodings={} jpeg_quality={} compression_level={} allow_indexed_colour={} shared={} tls={} server_hostname={}',
+            bool(username),
+            bool(password),
+            bool(host_key),
+            encodings,
+            jpeg_quality,
+            compression_level,
+            allow_indexed_colour,
+            shared,
+            ssl_context is not None,
+            server_hostname,
+        )
         intro = await reader.readline()
         if intro[:4] != b'RFB ':
-            raise ValueError('not a VNC server')
+            _erreur = ValueError('not a VNC server')
+            logger.debug('Client.create() lève | {!r}', _erreur)
+            raise _erreur
         try:
             server_major = int(intro[4:7])
             server_minor = int(intro[8:11])
-        except ValueError:
-            raise ValueError('not a VNC server')
+        except ValueError as exc:
+            _erreur = ValueError('not a VNC server')
+            logger.debug('Client.create() lève | {!r} (cause : {!r})', _erreur, exc)
+            raise _erreur
 
         # Repli de version de protocole (RFC 6143 §7.1.1 + Appendix A) : ce
         # client ne doit jamais réclamer une version supérieure à celle
@@ -2781,7 +3227,9 @@ class Client:
         # attendent une réponse "003.008" et se comportent alors en 3.8
         # standard.
         if server_major < 3:
-            raise ValueError(f'unsupported RFB protocol version: {intro!r}')
+            _erreur = ValueError(f'unsupported RFB protocol version: {intro!r}')
+            logger.debug('Client.create() lève | {!r}', _erreur)
+            raise _erreur
         elif server_major == 3 and server_minor == 7:
             server_version = (3, 7)
         elif server_major == 3 and server_minor < 7:
@@ -2798,13 +3246,19 @@ class Client:
             # sélection ici (Appendix A.1).
             auth_type = await read_int(reader, 4)
             if auth_type == 0:
-                raise ValueError(await read_text(reader, 'utf-8'))
+                _erreur = ValueError(await read_text(reader, 'utf-8'))
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             if auth_type not in (1, 2):
-                raise ValueError(f'unsupported security type: {auth_type}')
+                _erreur = ValueError(f'unsupported security type: {auth_type}')
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
         else:
             auth_types = set(await reader.readexactly(await read_int(reader, 1)))
             if not auth_types:
-                raise ValueError(await read_text(reader, 'utf-8'))
+                _erreur = ValueError(await read_text(reader, 'utf-8'))
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             # VeNCrypt (19) est délibérément en dernier de cette liste de
             # préférence : c'est une fonctionnalité neuve, jamais testée
             # contre un vrai serveur (voir CLAUDE.md), alors que 33/1/2 sont
@@ -2836,7 +3290,9 @@ class Client:
                     writer.write(auth_type.to_bytes(1, 'big'))
                     break
             else:
-                raise ValueError(f'unsupported auth types: {auth_types}')
+                _erreur = ValueError(f'unsupported auth types: {auth_types}')
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
 
         # VeNCrypt (TLS anonyme TLSNone/TLSVnc/TLSPlain, ou authentifié par
         # certificat X.509 X509None/X509Vnc/X509Plain depuis 2026-09-05/
@@ -2882,9 +3338,11 @@ class Client:
                 # contrainte de taille de clé cryptographique ici, à la
                 # différence du DES de VNC Auth juste en dessous).
                 if username is None or password is None:
-                    raise ValueError(
+                    _erreur = ValueError(
                         'server requires username and password (VeNCrypt Plain sub-type)'
                     )
+                    logger.debug('Client.create() lève | {!r}', _erreur)
+                    raise _erreur
                 username_bytes = username.encode('utf-8')
                 password_bytes = password.encode('utf-8')
                 writer.write(
@@ -2923,7 +3381,9 @@ class Client:
         # Apple authentication
         if auth_type == 33:
             if username is None or password is None:
-                raise ValueError('server requires username and password')
+                _erreur = ValueError('server requires username and password')
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             if host_key is None:
                 writer.write(b'\x00\x00\x00\x0a\x01\x00RSA1\x00\x00\x00\x00')
                 await reader.readexactly(4)  # packet length
@@ -2948,10 +3408,16 @@ class Client:
         # VNC authentication
         if auth_type == 2:
             if password is None:
-                raise ValueError('server requires password')
+                _erreur = ValueError('server requires password')
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             try:
                 raw_password = password.encode('ascii')
-            except UnicodeEncodeError:
+            except UnicodeEncodeError as exc:
+                logger.debug(
+                    'Client.create() mot de passe VNC non ASCII, repli latin-1 | position={}',
+                    exc.start,
+                )
                 # La VNC Auth classique n'a jamais eu d'encodage standard
                 # pour les mots de passe non-ASCII. Latin-1 couvre les
                 # caractères accentués courants (é, è, à, ç, ù...) en un
@@ -2983,12 +3449,18 @@ class Client:
         # préférence plus haut).
         if auth_type == 113:
             if username is None or password is None:
-                raise ValueError('server requires username and password')
+                _erreur = ValueError('server requires username and password')
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             generator = await read_int(reader, 8)
             modulus = await read_int(reader, 8)
             server_public = await read_int(reader, 8)
             if modulus < 2:
-                raise ValueError(f'paramètre Diffie-Hellman MSLogonII invalide (modulus={modulus})')
+                _erreur = ValueError(
+                    f'paramètre Diffie-Hellman MSLogonII invalide (modulus={modulus})'
+                )
+                logger.debug('Client.create() lève | {!r}', _erreur)
+                raise _erreur
             # Exposant privé client : un entier aléatoire sur 64 bits,
             # ramené dans [1, modulus-2] -- rfbproto.rst ne précise aucune
             # contrainte de génération au-delà de "the client can then
@@ -3050,7 +3522,7 @@ class Client:
         else:
             auth_result = await read_int(reader, 4)
         if auth_result == 0:
-            return cls(
+            _resultat = cls(
                 reader=reader,
                 writer=writer,
                 host_key=host_key,
@@ -3069,19 +3541,32 @@ class Client:
                     shared,
                 ),
             )
+            logger.debug(
+                'Client.create() retourne | client {}x{} prêt',
+                _resultat.video.width,
+                _resultat.video.height,
+            )
+            return _resultat
         elif auth_result == 1:
-            raise PermissionError('Auth failed')
+            _erreur = PermissionError('Auth failed')
+            logger.debug('Client.create() lève | {!r}', _erreur)
+            raise _erreur
         elif auth_result == 2:
-            raise PermissionError('Auth failed (too many attempts)')
+            _erreur = PermissionError('Auth failed (too many attempts)')
+            logger.debug('Client.create() lève | {!r}', _erreur)
+            raise _erreur
         else:
             reason = await reader.readexactly(auth_result)
-            raise PermissionError(reason.decode('utf-8'))
+            _erreur = PermissionError(reason.decode('utf-8'))
+            logger.debug('Client.create() lève | {!r}', _erreur)
+            raise _erreur
 
     async def read(self) -> UpdateType:
         """
         Reads an update from the server and returns its type.
         """
 
+        logger.trace('Client.read() appelée')
         update_type = UpdateType(await read_int(self.reader, 1))
 
         if update_type is UpdateType.CLIPBOARD:
@@ -3121,6 +3606,7 @@ class Client:
         if update_type is UpdateType.XVP:
             await self.process_xvp()
 
+        logger.trace('Client.read() retourne | {}', update_type)
         return update_type
 
     async def process_set_colour_map_entries(self):
@@ -3137,6 +3623,7 @@ class Client:
         defensively, in case a non-compliant/legacy server (e.g. some embedded
         OOB-management firmware) ignores the client's pixel format anyway.
         """
+        logger.debug('Client.process_set_colour_map_entries() appelée')
         await self.reader.readexactly(1)  # padding
         first_colour = await read_int(self.reader, 2)
         n_colours = await read_int(self.reader, 2)
@@ -3146,6 +3633,7 @@ class Client:
             b = await read_int(self.reader, 2)
             self.colour_map[first_colour + i] = (r, g, b)
             self.video.palette[first_colour + i] = (r >> 8, g >> 8, b >> 8)
+        logger.debug('Client.process_set_colour_map_entries() terminée')
 
     async def process_server_fence(self):
         """
@@ -3153,6 +3641,7 @@ class Client:
         a ClientFence carrying the same flags and payload but with the
         Request bit -- and any bits we don't understand -- cleared.
         """
+        logger.debug('Client.process_server_fence() appelée')
         await self.reader.readexactly(3)  # padding
         flags = await read_int(self.reader, 4)
         length = await read_int(self.reader, 1)
@@ -3160,6 +3649,7 @@ class Client:
 
         if flags & FENCE_FLAG_REQUEST:
             await self.send_client_fence(flags & _FENCE_KNOWN_FLAGS, payload)
+        logger.debug('Client.process_server_fence() terminée')
 
     async def process_xvp(self):
         """
@@ -3190,12 +3680,14 @@ class Client:
         reste correcte pour un serveur qui, lui, supporte réellement
         l'extension).
         """
+        logger.debug('Client.process_xvp() appelée')
         await self.reader.readexactly(1)  # padding
         version = await read_int(self.reader, 1)
         code = await read_int(self.reader, 1)
         if code == XVP_INIT:
             self.xvp_supported = True
             self.xvp_version = version
+        logger.debug('Client.process_xvp() terminée')
 
     async def process_extended_clipboard(self, total_length: int):
         """
@@ -3264,11 +3756,14 @@ class Client:
         décompressé, ou flux zlib invalide) plutôt que de risquer une
         désynchronisation silencieuse du reste de la connexion RFB.
         """
+        logger.debug('Client.process_extended_clipboard() appelée | total_length={}', total_length)
         if total_length < 4:
-            raise ValueError(
+            _erreur = ValueError(
                 f'process_extended_clipboard : message trop court ({total_length} octets, '
                 f'4 minimum pour le champ flags)'
             )
+            logger.debug('Client.process_extended_clipboard() lève | {!r}', _erreur)
+            raise _erreur
         flags = await read_int(self.reader, 4)
         remaining = total_length - 4
 
@@ -3278,9 +3773,11 @@ class Client:
                 fmt = 1 << bit
                 if flags & fmt:
                     if remaining < 4:
-                        raise ValueError(
+                        _erreur = ValueError(
                             'process_extended_clipboard : Caps tronqué (taille de format manquante)'
                         )
+                        logger.debug('Client.process_extended_clipboard() lève | {!r}', _erreur)
+                        raise _erreur
                     caps[fmt] = await read_int(self.reader, 4)
                     remaining -= 4
             self.clipboard_ext_server_caps = caps
@@ -3308,28 +3805,38 @@ class Client:
             try:
                 raw = decompressor.decompress(compressed, _MAX_ALLOC_BYTES)
             except zlib_error as exc:
-                raise ValueError(
+                _erreur = ValueError(
                     f'process_extended_clipboard : flux zlib invalide dans Provide ({exc})'
-                ) from exc
+                )
+                logger.debug(
+                    'Client.process_extended_clipboard() lève | {!r} (cause : {!r})', _erreur, exc
+                )
+                raise _erreur from exc
             if decompressor.unconsumed_tail:
-                raise ValueError(
+                _erreur = ValueError(
                     'process_extended_clipboard : charge utile décompressée de Provide dépasse le plafond de sécurité'
                 )
+                logger.debug('Client.process_extended_clipboard() lève | {!r}', _erreur)
+                raise _erreur
             offset = 0
             for bit in _CLIPBOARD_KNOWN_FORMAT_BITS:
                 fmt = 1 << bit
                 if not (flags & fmt):
                     continue
                 if offset + 4 > len(raw):
-                    raise ValueError(
+                    _erreur = ValueError(
                         'process_extended_clipboard : Provide tronqué (taille de format manquante)'
                     )
+                    logger.debug('Client.process_extended_clipboard() lève | {!r}', _erreur)
+                    raise _erreur
                 size = int.from_bytes(raw[offset : offset + 4], 'big')
                 offset += 4
                 if offset + size > len(raw):
-                    raise ValueError(
+                    _erreur = ValueError(
                         'process_extended_clipboard : Provide tronqué (données de format manquantes)'
                     )
+                    logger.debug('Client.process_extended_clipboard() lève | {!r}', _erreur)
+                    raise _erreur
                 data = raw[offset : offset + size]
                 offset += size
                 if fmt == CLIPBOARD_FORMAT_TEXT:
@@ -3345,17 +3852,24 @@ class Client:
             await self.reader.readexactly(
                 remaining
             )  # ignore tout octet excédentaire, sans désynchroniser le flux
+        logger.debug('Client.process_extended_clipboard() terminée')
 
     async def send_client_fence(self, flags: int, payload: bytes = b''):
         """
         Sends a ClientFence message (type 248). Requires the server to have
         advertised support via the Fence pseudo-encoding.
         """
+        logger.debug(
+            'Client.send_client_fence() appelée | flags={} len(payload)={}', flags, len(payload)
+        )
         if len(payload) > 64:
-            raise ValueError('ClientFence payload is limited to 64 bytes')
+            _erreur = ValueError('ClientFence payload is limited to 64 bytes')
+            logger.debug('Client.send_client_fence() lève | {!r}', _erreur)
+            raise _erreur
         self.writer.write(
             bytes([248, 0, 0, 0]) + flags.to_bytes(4, 'big') + bytes([len(payload)]) + payload
         )
+        logger.debug('Client.send_client_fence() terminée')
 
     async def send_enable_continuous_updates(
         self, enable: bool, x: int, y: int, width: int, height: int
@@ -3365,6 +3879,14 @@ class Client:
         after the server has confirmed support via the ContinuousUpdates
         pseudo-encoding -- there's no other handshake for it.
         """
+        logger.debug(
+            'Client.send_enable_continuous_updates() appelée | enable={} x={} y={} width={} height={}',
+            enable,
+            x,
+            y,
+            width,
+            height,
+        )
         self.writer.write(
             bytes([150, 1 if enable else 0])
             + x.to_bytes(2, 'big')
@@ -3373,6 +3895,7 @@ class Client:
             + height.to_bytes(2, 'big')
         )
         self.continuous_updates_active = enable
+        logger.debug('Client.send_enable_continuous_updates() terminée')
 
     async def send_set_desktop_size(self, width: int, height: int, screens: list | None = None):
         """
@@ -3389,6 +3912,12 @@ class Client:
         multi-écran existante, passer self.video.screens (éventuellement
         ajustée) en argument.
         """
+        logger.debug(
+            'Client.send_set_desktop_size() appelée | width={} height={} len(screens)={}',
+            width,
+            height,
+            None if screens is None else len(screens),
+        )
         if screens is None:
             screens = [Screen(0, 0, width, height, id=0, flags=0)]
 
@@ -3415,6 +3944,7 @@ class Client:
             screen_count=len(screens),
         )
         self.writer.write(b'\xfb\x00' + body)  # 251, padding, puis le corps
+        logger.debug('Client.send_set_desktop_size() terminée')
 
     async def send_qemu_extended_key_event(self, down: bool, keysym: int, keycode: int):
         """
@@ -3488,18 +4018,17 @@ class Client:
            cette extension est conçue, pas un moyen de forcer un
            caractère différent de la touche physique pressée.
         """
-        logger.info(
-            'send_qemu_extended_key_event | down={down} keysym={keysym:#x} keycode={keycode}',
-            down=down,
-            keysym=keysym,
-            keycode=keycode,
-        )
+        logger.debug('Client.send_qemu_extended_key_event() appelée | down={}', down)
+        # Ni keysym ni keycode dans le journal : ce serait un enregistreur de
+        # frappes (mot de passe saisi dans la session distante), SOCLE §8.
+        logger.info('send_qemu_extended_key_event | down={down}', down=down)
         self.writer.write(
             b'\xff\x00'  # message-type 255, submessage-type 0
             + (1 if down else 0).to_bytes(2, 'big')  # down-flag (U16)
             + keysym.to_bytes(4, 'big')
             + keycode.to_bytes(4, 'big')
         )
+        logger.debug('Client.send_qemu_extended_key_event() terminée')
 
     async def send_xvp(self, code: int, confirm: bool = False):
         """
@@ -3563,8 +4092,11 @@ class Client:
         été installé -- voir features-backlog.md pour la discussion de sa
         pertinence).
         """
+        logger.debug('Client.send_xvp() appelée | code={} confirm={}', code, confirm)
         if code not in (XVP_SHUTDOWN, XVP_REBOOT, XVP_RESET):
-            raise ValueError(f'invalid xvp-message-code: {code}')
+            _erreur = ValueError(f'invalid xvp-message-code: {code}')
+            logger.debug('Client.send_xvp() lève | {!r}', _erreur)
+            raise _erreur
         code_name = {
             XVP_SHUTDOWN: 'XVP_SHUTDOWN',
             XVP_REBOOT: 'XVP_REBOOT',
@@ -3585,22 +4117,30 @@ class Client:
             code_name=code_name,
         )
         self.writer.write(bytes([250, 0, _XVP_VERSION, code]))
+        logger.debug('Client.send_xvp() terminée')
 
     async def send_xvp_shutdown(self, confirm: bool = False):
         """Demande un arrêt propre du système distant (xvp). Voir send_xvp() pour *confirm*."""
+        logger.debug('Client.send_xvp_shutdown() appelée | confirm={}', confirm)
         await self.send_xvp(XVP_SHUTDOWN, confirm=confirm)
+        logger.debug('Client.send_xvp_shutdown() terminée')
 
     async def send_xvp_reboot(self, confirm: bool = False):
         """Demande un redémarrage propre du système distant (xvp). Voir send_xvp() pour *confirm*."""
+        logger.debug('Client.send_xvp_reboot() appelée | confirm={}', confirm)
         await self.send_xvp(XVP_REBOOT, confirm=confirm)
+        logger.debug('Client.send_xvp_reboot() terminée')
 
     async def send_xvp_reset(self, confirm: bool = False):
         """Demande un reset brutal du système distant (xvp). Voir send_xvp() pour *confirm*."""
+        logger.debug('Client.send_xvp_reset() appelée | confirm={}', confirm)
         await self.send_xvp(XVP_RESET, confirm=confirm)
+        logger.debug('Client.send_xvp_reset() terminée')
 
     def _require_clipboard_ext(self, method_name: str):
+        logger.debug('Client._require_clipboard_ext() appelée | method_name={}', method_name)
         if not self.clipboard_ext_supported:
-            raise PermissionError(
+            _erreur = PermissionError(
                 f'{method_name}() requiert que le serveur ait déjà confirmé le support '
                 f"d'Extended Clipboard (self.clipboard_ext_supported, cf. Enc.EXTENDED_CLIPBOARD "
                 f'et process_extended_clipboard()) -- envoyer ce message avant cette confirmation '
@@ -3608,6 +4148,9 @@ class Client:
                 f'faisant échouer la connexion entière ("extended clipboard message while '
                 f'disabled")'
             )
+            logger.debug('Client._require_clipboard_ext() lève | {!r}', _erreur)
+            raise _erreur
+        logger.debug('Client._require_clipboard_ext() terminée')
 
     async def send_clipboard_caps(self, max_text_size: int = 0):
         """
@@ -3634,6 +4177,7 @@ class Client:
 
         Exige self.clipboard_ext_supported -- voir _require_clipboard_ext().
         """
+        logger.debug('Client.send_clipboard_caps() appelée | max_text_size={}', max_text_size)
         self._require_clipboard_ext('send_clipboard_caps')
         flags = (
             CLIPBOARD_ACTION_CAPS
@@ -3645,6 +4189,7 @@ class Client:
         body = flags.to_bytes(4, 'big') + max_text_size.to_bytes(4, 'big')
         logger.info('send_clipboard_caps | max_text_size={size}', size=max_text_size)
         self.writer.write(bytes([6, 0, 0, 0]) + (-len(body)).to_bytes(4, 'big', signed=True) + body)
+        logger.debug('Client.send_clipboard_caps() terminée')
 
     async def send_clipboard_notify(self, formats: int = CLIPBOARD_FORMAT_TEXT):
         """
@@ -3659,12 +4204,14 @@ class Client:
         pour la preuve empirique (deux serveurs réels indépendants) que cet
         ordre est nécessaire, pas seulement recommandé par la spec.
         """
+        logger.debug('Client.send_clipboard_notify() appelée | formats={}', formats)
         self._require_clipboard_ext('send_clipboard_notify')
         flags = CLIPBOARD_ACTION_NOTIFY | (formats & 0xFFFF)
         logger.info('send_clipboard_notify | formats={formats:#06x}', formats=formats)
         self.writer.write(
             bytes([6, 0, 0, 0]) + (-4).to_bytes(4, 'big', signed=True) + flags.to_bytes(4, 'big')
         )
+        logger.debug('Client.send_clipboard_notify() terminée')
 
     async def send_clipboard_request(self, formats: int = CLIPBOARD_FORMAT_TEXT):
         """
@@ -3676,12 +4223,14 @@ class Client:
         cette bibliothèque. Exige self.clipboard_ext_supported -- voir
         _require_clipboard_ext().
         """
+        logger.debug('Client.send_clipboard_request() appelée | formats={}', formats)
         self._require_clipboard_ext('send_clipboard_request')
         flags = CLIPBOARD_ACTION_REQUEST | (formats & 0xFFFF)
         logger.info('send_clipboard_request | formats={formats:#06x}', formats=formats)
         self.writer.write(
             bytes([6, 0, 0, 0]) + (-4).to_bytes(4, 'big', signed=True) + flags.to_bytes(4, 'big')
         )
+        logger.debug('Client.send_clipboard_request() terminée')
 
     async def send_clipboard_provide(self, text: str):
         """
@@ -3725,6 +4274,7 @@ class Client:
         followed by a terminating null even though the length is also
         explicitly given").
         """
+        logger.debug('Client.send_clipboard_provide() appelée | len(text)={}', len(text))
         self._require_clipboard_ext('send_clipboard_provide')
         data = text.encode('utf-8') + b'\x00'
         inner = len(data).to_bytes(4, 'big') + data
@@ -3733,6 +4283,7 @@ class Client:
         body = flags.to_bytes(4, 'big') + compressed
         logger.info('send_clipboard_provide | {n} octets UTF-8 avant compression', n=len(data))
         self.writer.write(bytes([6, 0, 0, 0]) + (-len(body)).to_bytes(4, 'big', signed=True) + body)
+        logger.debug('Client.send_clipboard_provide() terminée')
 
     async def send_clipboard_update(self, text: str):
         """
@@ -3748,15 +4299,19 @@ class Client:
         Request déjà reçu (voir sa docstring) ; dans tous les autres cas,
         préférer cette méthode.
         """
+        logger.debug('Client.send_clipboard_update() appelée | len(text)={}', len(text))
         await self.send_clipboard_notify()
         await self.send_clipboard_provide(text)
+        logger.debug('Client.send_clipboard_update() terminée')
 
     async def drain(self):
         """
         Waits for data to be written to the server.
         """
 
+        logger.trace('Client.drain() appelée')
         await self.writer.drain()
+        logger.trace('Client.drain() terminée')
 
     async def screenshot(
         self, x: int = 0, y: int = 0, width: int | None = None, height: int | None = None
@@ -3765,12 +4320,18 @@ class Client:
         Takes a screenshot and returns a 3D RGBA array.
         """
 
+        logger.trace(
+            'Client.screenshot() appelée | x={} y={} width={} height={}', x, y, width, height
+        )
         self.video.data = None
         self.video.refresh(x, y, width, height)
         while True:
             update_type = await self.read()
             if update_type is UpdateType.VIDEO and self.video.is_complete(x, y, width, height):
-                return self.video.as_rgba(x, y, width, height)
+                _resultat = self.video.as_rgba(x, y, width, height)
+                logger.trace('Client.screenshot() retourne | tableau {}', _resultat.shape)
+                return _resultat
+        logger.trace('Client.screenshot() terminée')
 
 
 _WEBSOCKET_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3, constante fixe
@@ -3789,6 +4350,9 @@ def _ws_frame(payload: bytes, opcode: int = 0x2, mask: bool = True) -> bytes:
     cache poisoning de proxies intermédiaires mal écrits, sa seule raison
     d'être réelle d'après la RFC elle-même).
     """
+    logger.trace(
+        '_ws_frame() appelée | len(payload)={} opcode={} mask={}', len(payload), opcode, mask
+    )
     header = bytearray()
     header.append(0x80 | (opcode & 0x0F))  # FIN=1, RSV1-3=0, opcode
     length = len(payload)
@@ -3805,8 +4369,12 @@ def _ws_frame(payload: bytes, opcode: int = 0x2, mask: bool = True) -> bytes:
         key = urandom(4)
         header += key
         masked = bytes(b ^ key[i % 4] for i, b in enumerate(payload))
-        return bytes(header) + masked
-    return bytes(header) + payload
+        _resultat = bytes(header) + masked
+        logger.trace('_ws_frame() retourne | {} octet(s)', len(_resultat))
+        return _resultat
+    _resultat = bytes(header) + payload
+    logger.trace('_ws_frame() retourne | {} octet(s)', len(_resultat))
+    return _resultat
 
 
 class _WebSocketWriter:
@@ -3834,17 +4402,24 @@ class _WebSocketWriter:
     """
 
     def __init__(self, raw_writer: StreamWriter, pump_task=None, mask: bool = True):
+        logger.debug('_WebSocketWriter.__init__() appelée | mask={}', mask)
         self._raw = raw_writer
         self._pump_task = pump_task
         self._mask = mask
+        logger.debug('_WebSocketWriter.__init__() terminée')
 
     def write(self, data: bytes) -> None:
+        logger.trace('_WebSocketWriter.write() appelée | len(data)={}', len(data))
         self._raw.write(_ws_frame(bytes(data), mask=self._mask))
+        logger.trace('_WebSocketWriter.write() terminée')
 
     async def drain(self) -> None:
+        logger.trace('_WebSocketWriter.drain() appelée')
         await self._raw.drain()
+        logger.trace('_WebSocketWriter.drain() terminée')
 
     def close(self) -> None:
+        logger.debug('_WebSocketWriter.close() appelée')
         try:
             self._raw.write(_ws_frame(b'', opcode=0x8, mask=self._mask))
         except (OSError, RuntimeError, ssl.SSLError) as exc:
@@ -3880,12 +4455,15 @@ class _WebSocketWriter:
             # tâche dès que le côté écriture se ferme plutôt que
             # d'attendre qu'elle échoue de son côté.
             self._pump_task.cancel()
+        logger.debug('_WebSocketWriter.close() terminée')
 
     async def wait_closed(self) -> None:
+        logger.debug('_WebSocketWriter.wait_closed() appelée')
         try:
             await self._raw.wait_closed()
         except ssl.SSLError as exc:
             if 'APPLICATION_DATA_AFTER_CLOSE_NOTIFY' not in str(exc):
+                logger.debug('_WebSocketWriter.wait_closed() relève | {!r}', exc)
                 raise
             # Découvert par un test réel contre un vrai `websockify` en
             # TLS (`wss://`, `--run-once`) : quand le pair ferme la
@@ -3906,6 +4484,8 @@ class _WebSocketWriter:
             # dans `close()` ci-dessus, semble être ce qui la révèle).
             # Ignorée ici uniquement pour ce message d'erreur précis --
             # toute autre `ssl.SSLError` continue de remonter normalement.
+            logger.debug('_WebSocketWriter.wait_closed() course TLS bénigne ignorée | {!r}', exc)
+        logger.debug('_WebSocketWriter.wait_closed() terminée')
 
 
 async def _ws_pump(
@@ -3930,6 +4510,7 @@ async def _ws_pump(
     being replied to"), et à une trame *close* en fermant proprement le
     flux côté lecture (`feed_eof()`) puis en arrêtant la tâche.
     """
+    logger.debug('_ws_pump() appelée')
     try:
         while True:
             first2 = await raw_reader.readexactly(2)
@@ -3961,6 +4542,7 @@ async def _ws_pump(
                 pass
             elif opcode == 0x8:  # close
                 ws_reader.feed_eof()
+                logger.debug('_ws_pump() retourne')
                 return
             # Les opcodes réservés/inconnus sont ignorés plutôt que de
             # faire échouer toute la connexion -- la RFB elle-même adopte
@@ -3971,8 +4553,10 @@ async def _ws_pump(
         # `_WebSocketWriter.close()`) ne doit surtout pas être avalée ici
         # -- cela romprait la sémantique normale d'annulation d'asyncio
         # (l'appelant de `task.cancel()` ne serait jamais notifié).
+        logger.debug('_ws_pump() annulée, annulation propagée')
         raise
-    except (IncompleteReadError, ConnectionError, OSError):
+    except (IncompleteReadError, ConnectionError, OSError) as exc:
+        logger.debug('_ws_pump() fin de connexion, EOF signalé | {}: {}', type(exc).__name__, exc)
         # Fin de connexion pendant la lecture d'une trame -- que ce soit
         # une simple coupure TCP (`IncompleteReadError`/`ConnectionError`)
         # ou, découvert par un test réel contre un vrai `websockify` en
@@ -3989,6 +4573,7 @@ async def _ws_pump(
         # "Task exception was never retrieved" sur la sortie standard,
         # sans conséquence fonctionnelle mais trompeur pour l'appelant).
         ws_reader.feed_eof()
+    logger.debug('_ws_pump() terminée')
 
 
 async def _ws_handshake(
@@ -4006,6 +4591,7 @@ async def _ws_handshake(
     trames binaires, ce qu'un statut 101 garantit déjà en pratique pour
     ces deux implémentations.
     """
+    logger.debug('_ws_handshake() appelée | host={} port={} path={}', host, port, path)
     key = b64encode(urandom(16)).decode('ascii')
     request = (
         f'GET {path} HTTP/1.1\r\n'
@@ -4022,7 +4608,9 @@ async def _ws_handshake(
 
     status_line = await reader.readline()
     if b'101' not in status_line:
-        raise ValueError(f'WebSocket handshake refusée par le serveur : {status_line!r}')
+        _erreur = ValueError(f'WebSocket handshake refusée par le serveur : {status_line!r}')
+        logger.debug('_ws_handshake() lève | {!r}', _erreur)
+        raise _erreur
 
     headers = {}
     while True:
@@ -4036,11 +4624,14 @@ async def _ws_handshake(
         'ascii'
     )
     if headers.get('sec-websocket-accept') != expected_accept:
-        raise ValueError(
+        _erreur = ValueError(
             'WebSocket handshake invalide : Sec-WebSocket-Accept ne correspond pas '
             "à Sec-WebSocket-Key (RFC 6455 §4.2.2) -- le serveur n'est probablement "
             'pas un serveur WebSocket conforme'
         )
+        logger.debug('_ws_handshake() lève | {!r}', _erreur)
+        raise _erreur
+    logger.debug('_ws_handshake() terminée')
 
 
 async def _ws_wrap_connection(
@@ -4058,6 +4649,7 @@ async def _ws_wrap_connection(
     (`ProtocolVersion`) ne soit échangé, donc aucune des fonctions
     `_vencrypt_negotiate()` etc. n'a besoin d'avoir connaissance de ceci.
     """
+    logger.debug('_ws_wrap_connection() appelée | host={} port={} path={}', host, port, path)
     await _ws_handshake(reader, writer, host, port, path)
 
     ws_reader = StreamReader()
@@ -4072,6 +4664,7 @@ async def _ws_wrap_connection(
     ws_reader._ws_pump_task = pump_task  # type: ignore[attr-defined]
 
     ws_writer = _WebSocketWriter(writer, pump_task=pump_task)
+    logger.debug('_ws_wrap_connection() retourne | (ws_reader, ws_writer)')
     return ws_reader, ws_writer
 
 
@@ -4098,11 +4691,14 @@ async def _ws_handshake_server(reader: StreamReader, writer: StreamWriter) -> No
     jamais imposé unilatéralement -- même philosophie de tolérance que
     `_ws_handshake()` (client) vis-à-vis de ce même en-tête.
     """
+    logger.debug('_ws_handshake_server() appelée')
     request_line = await reader.readline()
     if not request_line.upper().startswith(b'GET '):
-        raise ValueError(
+        _erreur = ValueError(
             f'requête HTTP invalide pour une poignée de main WebSocket : {request_line!r}'
         )
+        logger.debug('_ws_handshake_server() lève | {!r}', _erreur)
+        raise _erreur
 
     headers: dict[str, str] = {}
     while True:
@@ -4113,12 +4709,16 @@ async def _ws_handshake_server(reader: StreamReader, writer: StreamWriter) -> No
         headers[name.strip().lower()] = value.strip()
 
     if headers.get('upgrade', '').lower() != 'websocket':
-        raise ValueError(
+        _erreur = ValueError(
             f"en-tête 'Upgrade: websocket' manquant ou incorrect : {headers.get('upgrade')!r}"
         )
+        logger.debug('_ws_handshake_server() lève | {!r}', _erreur)
+        raise _erreur
     key = headers.get('sec-websocket-key')
     if not key:
-        raise ValueError("en-tête 'Sec-WebSocket-Key' manquant dans la requête d'upgrade")
+        _erreur = ValueError("en-tête 'Sec-WebSocket-Key' manquant dans la requête d'upgrade")
+        logger.debug('_ws_handshake_server() lève | {!r}', _erreur)
+        raise _erreur
 
     accept = b64encode(sha1(key.encode('ascii') + _WEBSOCKET_GUID).digest()).decode('ascii')
     response_lines = [
@@ -4137,6 +4737,7 @@ async def _ws_handshake_server(reader: StreamReader, writer: StreamWriter) -> No
     response = ('\r\n'.join(response_lines) + '\r\n\r\n').encode('ascii')
     writer.write(response)
     await writer.drain()
+    logger.debug('_ws_handshake_server() terminée')
 
 
 async def _ws_wrap_connection_server(
@@ -4153,6 +4754,7 @@ async def _ws_wrap_connection_server(
     quand leur bit de masque est positionné, quel que soit le sens
     d'établissement de la connexion.
     """
+    logger.debug('_ws_wrap_connection_server() appelée')
     await _ws_handshake_server(reader, writer)
 
     ws_reader = StreamReader()
@@ -4161,6 +4763,7 @@ async def _ws_wrap_connection_server(
     ws_reader._ws_pump_task = pump_task  # type: ignore[attr-defined]
 
     ws_writer = _WebSocketWriter(writer, pump_task=pump_task, mask=False)
+    logger.debug('_ws_wrap_connection_server() retourne | (ws_reader, ws_writer)')
     return ws_reader, ws_writer
 
 
@@ -4194,6 +4797,22 @@ async def connect(
     et comment fournir une CA privée via *ssl_context*.
     """
 
+    logger.debug(
+        'connect() appelée | host={} port={} identifiant={} mot_de_passe={} cle_hote={} encodings={} jpeg_quality={} compression_level={} allow_indexed_colour={} shared={} tls={} websocket={} ws_path={}',
+        host,
+        port,
+        bool(username),
+        bool(password),
+        bool(host_key),
+        encodings,
+        jpeg_quality,
+        compression_level,
+        allow_indexed_colour,
+        shared,
+        ssl_context is not None,
+        websocket,
+        ws_path,
+    )
     opener = opener or open_connection
     reader, writer = await opener(host, port)
     if websocket:
@@ -4222,6 +4841,7 @@ async def connect(
     finally:
         writer.close()
         await writer.wait_closed()
+    logger.debug('connect() terminée')
 
 
 @asynccontextmanager
@@ -4317,15 +4937,36 @@ async def listen(
     situation -- un chemin de code différent de celui utilisé ici) pourrait
     laisser croire.
     """
+    logger.debug(
+        'listen() appelée | host={} port={} identifiant={} mot_de_passe={} cle_hote={} encodings={} jpeg_quality={} compression_level={} allow_indexed_colour={} shared={} tls={} websocket={}',
+        host,
+        port,
+        bool(username),
+        bool(password),
+        bool(host_key),
+        encodings,
+        jpeg_quality,
+        compression_level,
+        allow_indexed_colour,
+        shared,
+        ssl_context is not None,
+        websocket,
+    )
     incoming: Queue = Queue(maxsize=1)
 
     async def _accept(reader: StreamReader, writer: StreamWriter):
+        logger.debug('listen._accept() appelée')
         try:
             incoming.put_nowait((reader, writer))
         except QueueFull:
             # Une connexion inattendue en plus de la première -- ce mode
             # ne gère qu'une seule reconnexion inversée à la fois.
+            logger.warning(
+                'listen() connexion supplémentaire refusée (une seule reconnexion inversée à la fois) | pair={}',
+                writer.get_extra_info('peername'),
+            )
             writer.close()
+        logger.debug('listen._accept() terminée')
 
     server = await start_server(_accept, host, port)
     try:
@@ -4385,3 +5026,4 @@ async def listen(
     finally:
         writer.close()
         await writer.wait_closed()
+    logger.debug('listen() terminée')

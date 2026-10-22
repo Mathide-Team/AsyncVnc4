@@ -28,15 +28,23 @@ jobs:
         run: uv sync
 
       - name: Lint (ruff check)
-        run: uv run ruff check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py
+        run: uv run ruff check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py test_loguru_regles.py scripts/audit_debug_sorties.py
 
       - name: Formatage (ruff format --check)
-        run: uv run ruff format --check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py
+        run: uv run ruff format --check asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py test_loguru_regles.py scripts/audit_debug_sorties.py
 
       - name: Tests (unittest)
         # Suite documentée dans CLAUDE.md « Commandes de qualité » :
         # 50 tests, aucun vrai serveur VNC nécessaire.
         run: uv run python3 -m unittest test_asyncvnc2 -v
+
+      - name: Journalisation loguru (issue #55, SOCLE §8)
+        # Règles AST (pas de logging stdlib, format {}, pas de secret, except
+        # journalisé) + audit « debug en entrée et à chaque sortie » : la
+        # référence scripts/audit_debug_sorties.baseline ne peut que baisser.
+        run: |
+          uv run python3 -m unittest test_loguru_regles -v
+          uv run python3 scripts/audit_debug_sorties.py
 
   python39:
     # Issue #35 : Python 3.9 reste pris en charge (python3 système de
@@ -61,10 +69,10 @@ jobs:
           uv sync -p 3.9
 
       - name: Tests (unittest, Python 3.9)
-        run: uv run -p 3.9 python3 -m unittest test_asyncvnc2 -v
+        run: uv run -p 3.9 python3 -m unittest test_asyncvnc2 test_loguru_regles -v
 
       - name: Version minimale (vermin)
-        run: uvx vermin --no-tips --eval-annotations -t=3.9- --violations asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py test_live_qemu_sasl.py
+        run: uvx vermin --no-tips --eval-annotations -t=3.9- --violations asyncvnc2.py test_asyncvnc2.py test_live_x11vnc.py test_live_qemu_sasl.py test_loguru_regles.py scripts/audit_debug_sorties.py
 
   live:
     # Issues #28 et #27 : repli de version et connexion inversée contre un
