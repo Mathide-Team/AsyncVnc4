@@ -18,6 +18,7 @@ import unittest
 import zlib
 
 import numpy as np
+from loguru import logger
 
 import asyncvnc2
 from asyncvnc2 import (
@@ -387,6 +388,60 @@ class SendQemuExtendedKeyEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(int.from_bytes(sent[2:4], 'big'), 0)  # down-flag = False
         self.assertEqual(int.from_bytes(sent[4:8], 'big'), 0xFFFFFFFF)
         self.assertEqual(int.from_bytes(sent[8:12], 'big'), 0xFFFFFFFF)
+
+
+class JournalSansFrappeTests(unittest.IsolatedAsyncioTestCase):
+    """Issue #55 (SOCLE §8) : aucune frappe ni aucun secret dans les journaux, même en TRACE.
+
+    Un keysym/keycode ou le texte tapé dans le journal ferait de la bibliothèque
+    un enregistreur de frappes (mot de passe saisi dans la session distante).
+    """
+
+    def setUp(self):
+        self.messages: list[str] = []
+        self.sink_id = logger.add(lambda m: self.messages.append(str(m)), level='TRACE')
+
+    def tearDown(self):
+        logger.remove(self.sink_id)
+
+    def _journal(self) -> str:
+        return '\n'.join(self.messages)
+
+    async def test_qemu_extended_key_event_sans_keysym_ni_keycode(self):
+        client = make_client()
+        await client.send_qemu_extended_key_event(down=True, keysym=0x1234ABCD, keycode=0x5A5A)
+        journal = self._journal()
+        self.assertIn('send_qemu_extended_key_event', journal)
+        for fuite in ('0x1234abcd', str(0x1234ABCD), '1234abcd', str(0x5A5A), '0x5a5a'):
+            self.assertNotIn(fuite, journal.lower())
+
+    async def test_keyboard_write_sans_texte_tape(self):
+        client = make_client()
+        client.keyboard.write('Zq9!xW')
+        journal = self._journal()
+        self.assertIn('Keyboard.write() appelée | len(text)=6', journal)
+        self.assertNotIn('Zq9!xW', journal)
+        for touche in 'Zq9!xW':
+            self.assertNotIn(f"'{touche}'", journal)
+
+    async def test_clipboard_et_mot_de_passe_jamais_journalises(self):
+        client = make_client()
+        client.clipboard.write('presse-papiers-confidentiel')
+        with self.assertRaises(PermissionError):
+            await asyncvnc2._sasl_negotiate(
+                _reader_from((5).to_bytes(4, 'big') + b'PLAIN'),
+                _FakeWriter(),
+                'alice-identifiant',
+                'mot-de-passe-confidentiel',
+            )
+        journal = self._journal()
+        for secret in (
+            'presse-papiers-confidentiel',
+            'alice-identifiant',
+            'mot-de-passe-confidentiel',
+        ):
+            self.assertNotIn(secret, journal)
+        self.assertIn('identifiant=True mot_de_passe=True', journal)
 
 
 class SendXvpTests(unittest.IsolatedAsyncioTestCase):
