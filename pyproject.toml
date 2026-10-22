@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage[toml]>=7.6",  # couverture lignes + branches, seuil bloquant (issue #54)
     "ruff>=0.16",
 ]
 
@@ -29,3 +30,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 include = ["asyncvnc2.py"]
+
+[tool.coverage.run]
+# Couverture des branches obligatoire (Mathilde-Team/.github#9).
+branch = true
+source = ["asyncvnc2"]
+
+[tool.coverage.report]
+# Seuil bloquant de l'équipe : 95 % visé (décision du 21/10/2026,
+# Mathilde-Team/.github#9). Palier 1 (issue #54) : mesure du job Qualité au
+# 22/10/2026 (51,32 % lignes + branches, test_asyncvnc2 + test_reseau_local)
+# arrondie à l'entier inférieur ; à relever à chaque PR de tests. Déclaré ici
+# seulement, lu par `coverage report` dans ci.yml.
+fail_under = 51
+show_missing = true
