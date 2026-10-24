@@ -2483,6 +2483,25 @@ class Video:
         )
         logger.trace('Video.process_copy() terminée')
 
+    def _tpixel_vers_mode(self, block: np.ndarray) -> np.ndarray:
+        """
+        Reorders Tight TPIXEL data (always red, green, blue -- rfbproto.rst § Tight
+        Encoding: "the first byte is the red component, the second byte is the green
+        component, and the third byte is the blue component") into the byte order of the
+        negotiated pixel format, which _update_rect() expects.
+
+        Only 'bgra' and 'abgr' need a swap. 'bgra' is what TigerVNC Xvnc and x11vnc
+        propose by default (red_shift=16, little-endian): without this, every Tight
+        rectangle came out with red and blue swapped (found 2026-10-24 against a real
+        Xvnc, issue #27). CPIXEL (ZRLE/TRLE) is different: it is a slice of the pixel in
+        its own byte order, so it needs no reordering.
+        """
+        logger.trace('Video._tpixel_vers_mode() appelée | mode={} shape={}', self.mode, block.shape)
+        if self.mode in ('bgra', 'abgr'):
+            block = block[:, :, ::-1]
+        logger.trace('Video._tpixel_vers_mode() retourne')
+        return block
+
     async def process_tight(self, _reader, x, y, width, height):
         """
         Decodes a Tight or TightPng-encoded rectangle (BasicCompression, FillCompression,
@@ -2503,7 +2522,11 @@ class Video:
                 pixel = await _reader.readexactly(3)
                 block = pixel * (width * height)
                 self._update_rect(
-                    x, x + width, y, y + height, np.ndarray((height, width, 3), 'B', block)
+                    x,
+                    x + width,
+                    y,
+                    y + height,
+                    self._tpixel_vers_mode(np.ndarray((height, width, 3), 'B', block)),
                 )
                 logger.trace('Video.process_tight() retourne')
                 return
@@ -2512,7 +2535,7 @@ class Video:
                 _check_alloc_size(length, 'Tight (JPEG/PNG)')
                 image_data = await _reader.readexactly(length)
                 block = _tight_decode_image(image_data, width, height)
-                self._update_rect(x, x + width, y, y + height, block)
+                self._update_rect(x, x + width, y, y + height, self._tpixel_vers_mode(block))
                 logger.trace('Video.process_tight() retourne')
                 return
             _erreur = ValueError(f'Invalid Tight compression-control byte: {ctl:#x}')
@@ -2551,7 +2574,13 @@ class Video:
         else:
             block = raw
 
-        self._update_rect(x, x + width, y, y + height, np.ndarray((height, width, 3), 'B', block))
+        self._update_rect(
+            x,
+            x + width,
+            y,
+            y + height,
+            self._tpixel_vers_mode(np.ndarray((height, width, 3), 'B', block)),
+        )
         await sleep(0)
         logger.trace('Video.process_tight() terminée')
 
