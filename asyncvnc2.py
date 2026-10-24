@@ -2286,13 +2286,31 @@ class Video:
         )
         return (x, y, width, height)
 
-    def refresh(self, x: int = 0, y: int = 0, width: int | None = None, height: int | None = None):
+    def refresh(
+        self,
+        x: int = 0,
+        y: int = 0,
+        width: int | None = None,
+        height: int | None = None,
+        incremental: bool | None = None,
+    ):
         """
         Sends a video buffer update request to the server.
+
+        ``incremental`` defaults to "a buffer already exists"; screenshot() forces
+        True when it re-requests an area left incomplete (see Client.screenshot()).
         """
 
-        logger.trace('Video.refresh() appelée | x={} y={} width={} height={}', x, y, width, height)
-        incremental = self.data is not None
+        logger.trace(
+            'Video.refresh() appelée | x={} y={} width={} height={} incremental={}',
+            x,
+            y,
+            width,
+            height,
+            incremental,
+        )
+        if incremental is None:
+            incremental = self.data is not None
 
         (x, y, width, height) = self.get_rect(x, y, width, height)
 
@@ -4347,6 +4365,18 @@ class Client:
     ):
         """
         Takes a screenshot and returns a 3D RGBA array.
+
+        Each FramebufferUpdate answers exactly one FramebufferUpdateRequest
+        (rfbproto.rst § FramebufferUpdate), so when an update leaves the area
+        incomplete a new *incremental* request is sent. TigerVNC Xvnc
+        (``VNCSConnectionST::framebufferUpdateRequest``) answers every
+        non-incremental request of a client that advertised ExtendedDesktopSize with
+        an update holding only that pseudo-rectangle, marks the area as changed and
+        sends the pixels on the next incremental request -- as its own viewer does.
+        Without the new request screenshot() waited forever, and a non-incremental
+        one would loop on desktop-size-only updates (both found 2026-10-24 against a
+        real Xvnc, issue #27). The area never received is still "changed" on the
+        server side, so an incremental request does bring it.
         """
 
         logger.trace(
@@ -4356,10 +4386,13 @@ class Client:
         self.video.refresh(x, y, width, height)
         while True:
             update_type = await self.read()
-            if update_type is UpdateType.VIDEO and self.video.is_complete(x, y, width, height):
-                _resultat = self.video.as_rgba(x, y, width, height)
-                logger.trace('Client.screenshot() retourne | tableau {}', _resultat.shape)
-                return _resultat
+            if update_type is UpdateType.VIDEO:
+                if self.video.is_complete(x, y, width, height):
+                    _resultat = self.video.as_rgba(x, y, width, height)
+                    logger.trace('Client.screenshot() retourne | tableau {}', _resultat.shape)
+                    return _resultat
+                logger.trace('Client.screenshot() | zone incomplète, nouvelle demande')
+                self.video.refresh(x, y, width, height, incremental=True)
         logger.trace('Client.screenshot() terminée')
 
 
